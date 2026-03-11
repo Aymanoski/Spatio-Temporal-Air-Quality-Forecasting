@@ -51,7 +51,10 @@ CONFIG = {
     
     # Paths
     'model_save_path': 'models/checkpoints/',
-    'best_model_name': 'best_model.pt'
+    'best_model_name': 'best_model.pt',
+    
+    # Resume training
+    'resume': True          # Set to True to resume from checkpoint
 }
 
 
@@ -313,11 +316,24 @@ def train(config):
     best_val_loss = float('inf')
     patience_counter = 0
     history = {'train_loss': [], 'val_loss': []}
+    start_epoch = 0
     
     # Create checkpoint directory
     os.makedirs(config['model_save_path'], exist_ok=True)
     
-    for epoch in range(config['epochs']):
+    # Resume from checkpoint if specified
+    checkpoint_path = os.path.join(config['model_save_path'], config['best_model_name'])
+    if config.get('resume', False) and os.path.exists(checkpoint_path):
+        print(f"\nResuming from checkpoint: {checkpoint_path}")
+        checkpoint = torch.load(checkpoint_path, weights_only=False)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        start_epoch = checkpoint['epoch'] + 1
+        best_val_loss = checkpoint['val_loss']
+        print(f"  Resuming from epoch {start_epoch}")
+        print(f"  Best validation loss: {best_val_loss:.6f}")
+    
+    for epoch in range(start_epoch, config['epochs']):
         start_time = time.time()
         
         # Calculate teacher forcing ratio (linear decay)
