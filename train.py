@@ -5,6 +5,7 @@ Air quality (PM2.5) forecasting using spatio-temporal graph neural networks.
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 import numpy as np
@@ -40,6 +41,13 @@ CONFIG = {
     'patience': 15,          # Early stopping patience
     'teacher_forcing_start': 1.0,  # Initial teacher forcing ratio
     'teacher_forcing_end': 0.0,    # Final teacher forcing ratio
+
+    # Loss
+    'loss_type': 'evt_hybrid',     # Options: 'mse' or 'evt_hybrid'
+    'evt_lambda': 0.05,            # Weight of EVT tail component
+    'evt_tail_quantile': 0.90,     # Threshold quantile for extremes
+    'evt_xi': 0.10,                # GPD shape parameter
+    'evt_threshold': None,         # Populated from training targets
     
     # Data split
     'train_ratio': 0.7,
@@ -56,6 +64,43 @@ CONFIG = {
     # Resume training
     'resume': True          # Set to True to resume from checkpoint
 }
+
+
+class EVTHybridLoss(nn.Module):
+    """Hybrid loss: standard MSE + Generalized Pareto tail-aware penalty."""
+
+    def __init__(self, threshold, lambda_tail=0.05, xi=0.10, eps=1e-6):
+        super().__init__()
+        self.threshold = float(threshold)
+        self.lambda_tail = float(lambda_tail)
+        self.xi = float(xi)
+        self.eps = float(eps)
+
+    def _gpd_nll(self, excess):
+        """Negative log-likelihood of exceedances under a fixed-xi GPD."""
+        scale = excess + self.eps
+
+        if abs(self.xi) < 1e-8:
+            return torch.log(scale) + excess / scale
+
+        t = 1.0 + (self.xi * excess) / scale
+        return torch.log(scale) + (1.0 / self.xi + 1.0) * torch.log(torch.clamp(t, min=self.eps))
+
+    def forward(self, predictions, targets):
+        mse = F.mse_loss(predictions, targets)
+
+        threshold = targets.new_tensor(self.threshold)
+        target_excess = targets - threshold
+        pred_excess = F.relu(predictions - threshold)
+
+        mask = target_excess > 0
+        if mask.any():
+            excess_error = torch.abs(pred_excess[mask] - target_excess[mask])
+            tail_loss = self._gpd_nll(excess_error).mean()
+        else:
+            tail_loss = mse.new_zeros(())
+
+        return mse + self.lambda_tail * tail_loss
 
 
 # ============================================================================
@@ -278,6 +323,12 @@ def train(config):
     # Split data
     print("\n[2/5] Splitting data...")
     train_data, val_data, test_data = split_data(X, Y, config)
+
+    # Derive EVT threshold from training targets only to avoid leakage
+    if config.get('evt_threshold') is None:
+        _, Y_train = train_data
+        config['evt_threshold'] = float(np.quantile(Y_train, config['evt_tail_quantile']))
+
     train_loader, val_loader, test_loader = create_dataloaders(
         train_data, val_data, test_data, config
     )
@@ -297,7 +348,21 @@ def train(config):
     print(f"  Model parameters: {model.get_num_params():,}")
     
     # Loss and optimizer
-    criterion = nn.MSELoss()
+    if config.get('loss_type', 'mse') == 'evt_hybrid':
+        criterion = EVTHybridLoss(
+            threshold=config['evt_threshold'],
+            lambda_tail=config['evt_lambda'],
+            xi=config['evt_xi']
+        )
+        print(
+            f"  Loss: EVT Hybrid (lambda={config['evt_lambda']}, "
+            f"q={config['evt_tail_quantile']}, xi={config['evt_xi']}, "
+            f"threshold={config['evt_threshold']:.4f})"
+        )
+    else:
+        criterion = nn.MSELoss()
+        print("  Loss: MSE")
+
     optimizer = optim.Adam(
         model.parameters(),
         lr=config['learning_rate'],

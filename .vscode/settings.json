@@ -1,0 +1,19 @@
+{
+  "files.watcherExclude": {
+    "**/data/**": true,
+    "**/.venv/**": true,
+    "**/__pycache__/**": true,
+    "**/models/checkpoints/**": true
+  },
+  "search.exclude": {
+    "**/data/**": true,
+    "**/.venv/**": true,
+    "**/__pycache__/**": true,
+    "**/models/checkpoints/**": true
+  },
+  "python.analysis.diagnosticMode": "openFilesOnly",
+  "python.analysis.exclude": [
+    "**/.venv/**",
+    "**/data/**"
+  ]
+}
