@@ -3,7 +3,11 @@
     "**/data/**": true,
     "**/.venv/**": true,
     "**/__pycache__/**": true,
-    "**/models/checkpoints/**": true
+    "**/models/checkpoints/**": true,
+    "**/*.npy": true,
+    "**/*.pt": true,
+    "**/*.pth": true,
+    "**/*.ckpt": true
   },
   "search.exclude": {
     "**/data/**": true,
@@ -14,6 +18,10 @@
   "python.analysis.diagnosticMode": "openFilesOnly",
   "python.analysis.exclude": [
     "**/.venv/**",
-    "**/data/**"
-  ]
+    "**/data/**",
+    "**/models/checkpoints/**"
+  ],
+  "python.analysis.autoImportCompletions": false,
+  "python.linting.enabled": true,
+  "python.linting.pylintEnabled": false
 }

@@ -3,3 +3,10 @@ data/
 __pycache__/
 *.pyc
 models/checkpoints/
+*.pt
+*.pth
+*.ckpt
+*.npy
+*.pkl
+*.h5
+*.save
