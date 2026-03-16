@@ -76,7 +76,9 @@ class GraphLSTMDecoder(nn.Module):
         Args:
             encoder_outputs: Encoder outputs for attention (batch, enc_seq_len, num_nodes, hidden_dim)
             hidden_states: Initial hidden states from encoder - list of (h, c) per layer
-            adj: Adjacency matrix (num_nodes, num_nodes)
+            adj: Adjacency matrix
+                 - Static: (num_nodes, num_nodes)
+                 - Dynamic: (batch, num_nodes, num_nodes)
             target: Ground truth for teacher forcing (batch, horizon, num_nodes) - optional
             horizon: Number of prediction steps
             teacher_forcing_ratio: Probability of using teacher forcing

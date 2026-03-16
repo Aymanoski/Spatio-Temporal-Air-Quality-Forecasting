@@ -125,14 +125,16 @@ class GCNLSTMModel(nn.Module):
     def forward(self, x, adj, target=None, horizon=6, teacher_forcing_ratio=0.5):
         """
         Forward pass through encoder-decoder.
-        
+
         Args:
             x: Input sequence (batch, seq_len, num_nodes, input_dim)
-            adj: Normalized adjacency matrix (num_nodes, num_nodes)
+            adj: Normalized adjacency matrix
+                 - Static: (num_nodes, num_nodes)
+                 - Dynamic: (batch, num_nodes, num_nodes)
             target: Ground truth for teacher forcing (batch, horizon, num_nodes) - optional
             horizon: Number of prediction steps
             teacher_forcing_ratio: Probability of using teacher forcing during training
-        
+
         Returns:
             predictions: (batch, horizon, num_nodes, output_dim)
             attention_weights: (batch, horizon, num_heads, num_nodes, seq_len)
@@ -155,12 +157,14 @@ class GCNLSTMModel(nn.Module):
     def predict(self, x, adj, horizon=6):
         """
         Inference without teacher forcing.
-        
+
         Args:
             x: Input sequence (batch, seq_len, num_nodes, input_dim)
-            adj: Normalized adjacency matrix (num_nodes, num_nodes)
+            adj: Normalized adjacency matrix
+                 - Static: (num_nodes, num_nodes)
+                 - Dynamic: (batch, num_nodes, num_nodes)
             horizon: Number of prediction steps
-        
+
         Returns:
             predictions: (batch, horizon, num_nodes, output_dim)
         """

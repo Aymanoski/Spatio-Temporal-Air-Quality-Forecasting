@@ -62,7 +62,9 @@ class GraphLSTMEncoder(nn.Module):
         """
         Args:
             x: Input sequence (batch, seq_len, num_nodes, input_dim)
-            adj: Adjacency matrix (num_nodes, num_nodes)
+            adj: Adjacency matrix
+                 - Static: (num_nodes, num_nodes)
+                 - Dynamic: (batch, num_nodes, num_nodes)
         Returns:
             encoder_outputs: All timestep outputs (batch, seq_len, num_nodes, hidden_dim)
             hidden_states: List of (h, c) for each layer - final states for decoder init

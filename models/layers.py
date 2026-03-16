@@ -41,19 +41,24 @@ class GraphConvolution(nn.Module):
         """
         Args:
             x: Node features (batch, num_nodes, in_features)
-            adj: Normalized adjacency matrix (num_nodes, num_nodes)
+            adj: Normalized adjacency matrix
+                 - Static: (num_nodes, num_nodes)
+                 - Dynamic: (batch, num_nodes, num_nodes)
         Returns:
             out: (batch, num_nodes, out_features)
         """
         # x @ W: (batch, num_nodes, out_features)
         support = torch.matmul(x, self.weight)
-        
+
         # A_hat @ (x @ W): spatial aggregation
+        # torch.matmul handles both static (2D) and dynamic (3D) adjacency:
+        # - Static: (num_nodes, num_nodes) @ (batch, num_nodes, out_features) -> (batch, num_nodes, out_features)
+        # - Dynamic: (batch, num_nodes, num_nodes) @ (batch, num_nodes, out_features) -> (batch, num_nodes, out_features)
         out = torch.matmul(adj, support)
-        
+
         if self.bias is not None:
             out = out + self.bias
-        
+
         return out
 
 
@@ -89,7 +94,9 @@ class GraphLSTMCell(nn.Module):
         Args:
             x: Input at current timestep (batch, num_nodes, input_dim)
             hidden: Tuple of (h, c) each (batch, num_nodes, hidden_dim)
-            adj: Adjacency matrix (num_nodes, num_nodes)
+            adj: Adjacency matrix
+                 - Static: (num_nodes, num_nodes)
+                 - Dynamic: (batch, num_nodes, num_nodes)
         Returns:
             h_new, c_new: Updated hidden and cell states
         """

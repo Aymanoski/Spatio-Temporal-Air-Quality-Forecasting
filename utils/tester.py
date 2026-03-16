@@ -13,6 +13,7 @@ import joblib
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models import GCNLSTMModel
+from graph import build_wind_aware_adjacency_batch, WIND_CATEGORIES
 
 
 # ============================================================================
@@ -104,27 +105,89 @@ def load_data(data_path, config):
     return X_test, Y_test, adj
 
 
+def extract_wind_features(X_batch, config):
+    """
+    Extract wind speed and direction from input batch.
+
+    Args:
+        X_batch: (batch, timesteps, num_nodes, features) tensor
+        config: configuration dict
+
+    Returns:
+        wind_speeds: (batch, timesteps, num_nodes) tensor
+        wind_directions: (batch, timesteps, num_nodes, num_wind_categories) tensor
+    """
+    wind_speed_idx = config.get('wind_speed_idx', 10)
+    wind_dir_start = config.get('wind_dir_start_idx', 17)
+    wind_dir_end = config.get('wind_dir_end_idx', 33)
+
+    # Extract wind speed (single feature)
+    wind_speeds = X_batch[:, :, :, wind_speed_idx]  # (batch, timesteps, nodes)
+
+    # Extract wind direction one-hot (multiple features)
+    wind_directions = X_batch[:, :, :, wind_dir_start:wind_dir_end]  # (batch, timesteps, nodes, categories)
+
+    return wind_speeds, wind_directions
+
+
+def build_dynamic_adjacency(X_batch, config, device):
+    """
+    Build dynamic wind-aware adjacency matrix for a batch.
+
+    Args:
+        X_batch: (batch, timesteps, num_nodes, features) tensor
+        config: configuration dict
+        device: torch device
+
+    Returns:
+        adj_batch: (batch, num_nodes, num_nodes) tensor
+    """
+    wind_speeds, wind_directions = extract_wind_features(X_batch, config)
+
+    # Build wind-aware adjacency
+    adj_batch = build_wind_aware_adjacency_batch(
+        wind_speeds=wind_speeds,
+        wind_directions=wind_directions,
+        wind_categories=WIND_CATEGORIES,
+        alpha=config.get('wind_alpha', 0.6),
+        distance_sigma=config.get('distance_sigma', 100)
+    )
+
+    # Convert to tensor
+    adj_batch = torch.FloatTensor(adj_batch).to(device)
+
+    return adj_batch
+
+
 def evaluate(model, X_test, Y_test, adj, config):
     """Run evaluation on test set."""
     print("\nRunning evaluation...")
-    
+
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     model = model.to(device)
     adj_tensor = torch.FloatTensor(adj).to(device)
-    
+
+    use_wind_adj = config.get('use_wind_adjacency', False)
+
     # Batch prediction
     batch_size = config.get('batch_size', 32)
     all_preds = []
-    
+
     with torch.no_grad():
         for i in range(0, len(X_test), batch_size):
             batch_x = torch.FloatTensor(X_test[i:i+batch_size]).to(device)
-            
-            pred = model.predict(batch_x, adj_tensor, horizon=config['horizon'])
+
+            # Build dynamic adjacency if enabled
+            if use_wind_adj:
+                adj_batch = build_dynamic_adjacency(batch_x, config, device)
+            else:
+                adj_batch = adj_tensor
+
+            pred = model.predict(batch_x, adj_batch, horizon=config['horizon'])
             all_preds.append(pred.cpu().numpy())
-    
+
     predictions = np.concatenate(all_preds, axis=0)
-    
+
     return predictions
 
 

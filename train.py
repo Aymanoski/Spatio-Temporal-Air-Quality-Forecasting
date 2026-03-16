@@ -13,6 +13,7 @@ import os
 import time
 import joblib
 from models import GCNLSTMModel
+from utils.graph import build_wind_aware_adjacency_batch, WIND_CATEGORIES
 
 # ============================================================================
 # Configuration
@@ -48,7 +49,15 @@ CONFIG = {
     'evt_tail_quantile': 0.90,     # Threshold quantile for extremes
     'evt_xi': 0.10,                # GPD shape parameter
     'evt_threshold': None,         # Populated from training targets
-    
+
+    # Wind-aware adjacency
+    'use_wind_adjacency': True,    # Use dynamic wind-aware adjacency
+    'wind_alpha': 0.6,             # Wind influence weight (0=distance-only, 1=wind-only)
+    'distance_sigma': 100,         # Distance decay parameter
+    'wind_speed_idx': 10,          # Index of wind speed feature (wspm)
+    'wind_dir_start_idx': 17,      # Start index of wind direction one-hot
+    'wind_dir_end_idx': 33,        # End index of wind direction one-hot
+
     # Data split
     'train_ratio': 0.7,
     'val_ratio': 0.15,
@@ -110,17 +119,71 @@ class EVTHybridLoss(nn.Module):
 def load_data(config):
     """Load preprocessed data tensors."""
     data_path = config['data_path']
-    
+
     # Load feature tensor and adjacency matrix
     X = np.load(os.path.join(data_path, 'X.npy'))
     Y = np.load(os.path.join(data_path, 'Y.npy'))
     adj = np.load(os.path.join(data_path, 'adjacency.npy'))
-    
+
     print(f"Loaded X: {X.shape}")  # (samples, input_len, num_nodes, features)
     print(f"Loaded Y: {Y.shape}")  # (samples, horizon, num_nodes)
     print(f"Loaded adjacency: {adj.shape}")  # (num_nodes, num_nodes)
-    
+
     return X, Y, adj
+
+
+def extract_wind_features(X_batch, config):
+    """
+    Extract wind speed and direction from input batch.
+
+    Args:
+        X_batch: (batch, timesteps, num_nodes, features) tensor
+        config: configuration dict
+
+    Returns:
+        wind_speeds: (batch, timesteps, num_nodes) tensor
+        wind_directions: (batch, timesteps, num_nodes, num_wind_categories) tensor
+    """
+    wind_speed_idx = config['wind_speed_idx']
+    wind_dir_start = config['wind_dir_start_idx']
+    wind_dir_end = config['wind_dir_end_idx']
+
+    # Extract wind speed (single feature)
+    wind_speeds = X_batch[:, :, :, wind_speed_idx]  # (batch, timesteps, nodes)
+
+    # Extract wind direction one-hot (multiple features)
+    wind_directions = X_batch[:, :, :, wind_dir_start:wind_dir_end]  # (batch, timesteps, nodes, categories)
+
+    return wind_speeds, wind_directions
+
+
+def build_dynamic_adjacency(X_batch, config, device):
+    """
+    Build dynamic wind-aware adjacency matrix for a batch.
+
+    Args:
+        X_batch: (batch, timesteps, num_nodes, features) tensor
+        config: configuration dict
+        device: torch device
+
+    Returns:
+        adj_batch: (batch, num_nodes, num_nodes) tensor
+    """
+    wind_speeds, wind_directions = extract_wind_features(X_batch, config)
+
+    # Build wind-aware adjacency
+    adj_batch = build_wind_aware_adjacency_batch(
+        wind_speeds=wind_speeds,
+        wind_directions=wind_directions,
+        wind_categories=WIND_CATEGORIES,
+        alpha=config['wind_alpha'],
+        distance_sigma=config['distance_sigma']
+    )
+
+    # Convert to tensor
+    adj_batch = torch.FloatTensor(adj_batch).to(device)
+
+    return adj_batch
 
 
 def split_data(X, Y, config):
@@ -191,17 +254,24 @@ def train_epoch(model, train_loader, optimizer, criterion, adj, config, teacher_
     model.train()
     total_loss = 0
     device = config['device']
-    
+    use_wind_adj = config.get('use_wind_adjacency', False)
+
     for batch_idx, (X_batch, Y_batch) in enumerate(train_loader):
         X_batch = X_batch.to(device)
         Y_batch = Y_batch.to(device)
-        
+
         optimizer.zero_grad()
-        
+
+        # Build dynamic adjacency if enabled
+        if use_wind_adj:
+            adj_batch = build_dynamic_adjacency(X_batch, config, device)
+        else:
+            adj_batch = adj
+
         # Forward pass
         predictions, _ = model(
             x=X_batch,
-            adj=adj,
+            adj=adj_batch,
             target=Y_batch,
             horizon=config['horizon'],
             teacher_forcing_ratio=teacher_forcing_ratio
@@ -232,16 +302,23 @@ def validate(model, val_loader, criterion, adj, config):
     model.eval()
     total_loss = 0
     device = config['device']
-    
+    use_wind_adj = config.get('use_wind_adjacency', False)
+
     with torch.no_grad():
         for X_batch, Y_batch in val_loader:
             X_batch = X_batch.to(device)
             Y_batch = Y_batch.to(device)
-            
+
+            # Build dynamic adjacency if enabled
+            if use_wind_adj:
+                adj_batch = build_dynamic_adjacency(X_batch, config, device)
+            else:
+                adj_batch = adj
+
             # Forward pass (no teacher forcing)
             predictions, _ = model(
                 x=X_batch,
-                adj=adj,
+                adj=adj_batch,
                 target=None,
                 horizon=config['horizon'],
                 teacher_forcing_ratio=0.0
