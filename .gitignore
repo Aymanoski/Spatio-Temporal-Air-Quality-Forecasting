@@ -2,10 +2,9 @@ data/
 .venv/
 __pycache__/
 *.pyc
-models/checkpoints/
-*.pt
-*.pth
-*.ckpt
+models/checkpoints/*.pt
+models/checkpoints/*.pth
+models/checkpoints/*.ckpt
 *.npy
 *.pkl
 *.h5

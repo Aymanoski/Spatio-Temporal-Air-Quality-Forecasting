@@ -12,7 +12,10 @@
     "**/*.pt": true,
     "**/*.pth": true,
     "**/*.ckpt": true,
-    "**/*.pyc": true
+    "**/*.pyc": true,
+    "**/*.pkl": true,
+    "**/*.h5": true,
+    "**/*.save": true
   },
   "search.exclude": {
     "**/data/**": true,
@@ -29,6 +32,7 @@
   "python.analysis.autoImportCompletions": false,
   "python.linting.enabled": true,
   "python.linting.pylintEnabled": false,
+  "python.analysis.indexing": false,
   "terminal.integrated.env.windows": {
     "PYTHONDONTWRITEBYTECODE": "1"
   }

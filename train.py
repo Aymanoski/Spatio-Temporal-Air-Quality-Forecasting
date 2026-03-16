@@ -70,9 +70,14 @@ CONFIG = {
     # Paths
     'model_save_path': 'models/checkpoints/',
     'best_model_name': 'best_model.pt',
-    
+
+    # Checkpoint naming (for comparing different runs)
+    'architecture_name': 'gcn_lstm_v1',     # Change this for different architectures
+    'hardware_tag': 'integrated_gpu',       # Options: 'integrated_gpu', 'colab_t4', 'rtx3090', etc.
+    'use_versioned_checkpoint': True,       # If True, saves as <arch>_<hardware>_best.pt
+
     # Resume training
-    'resume': True          # Set to True to resume from checkpoint
+    'resume': False         # Set to True to resume from checkpoint
 }
 
 
@@ -465,9 +470,19 @@ def train(config):
     
     # Create checkpoint directory
     os.makedirs(config['model_save_path'], exist_ok=True)
-    
+
+    # Determine checkpoint filename
+    if config.get('use_versioned_checkpoint', False):
+        arch_name = config.get('architecture_name', 'model')
+        hw_tag = config.get('hardware_tag', 'unknown')
+        checkpoint_filename = f"{arch_name}_{hw_tag}_best.pt"
+    else:
+        checkpoint_filename = config['best_model_name']
+
+    checkpoint_path = os.path.join(config['model_save_path'], checkpoint_filename)
+    print(f"\nCheckpoint path: {checkpoint_path}")
+
     # Resume from checkpoint if specified
-    checkpoint_path = os.path.join(config['model_save_path'], config['best_model_name'])
     if config.get('resume', False) and os.path.exists(checkpoint_path):
         print(f"\nResuming from checkpoint: {checkpoint_path}")
         checkpoint = torch.load(checkpoint_path, weights_only=False)
@@ -514,14 +529,28 @@ def train(config):
             best_val_loss = val_loss
             patience_counter = 0
             
-            # Save best model
+            # Save best model with metadata
             torch.save({
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'val_loss': val_loss,
-                'config': config
-            }, os.path.join(config['model_save_path'], config['best_model_name']))
+                'train_loss': train_loss,
+                'config': config,
+                'hardware': {
+                    'device': str(device),
+                    'tag': config.get('hardware_tag', 'unknown'),
+                    'cuda_available': torch.cuda.is_available(),
+                    'cuda_device_name': torch.cuda.get_device_name(0) if torch.cuda.is_available() else None
+                },
+                'architecture': {
+                    'name': config.get('architecture_name', 'unknown'),
+                    'num_params': model.get_num_params(),
+                    'use_direct_decoding': config.get('use_direct_decoding', False),
+                    'use_wind_adjacency': config.get('use_wind_adjacency', False)
+                },
+                'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+            }, checkpoint_path)
             print(f"  -> Saved best model (val_loss: {val_loss:.6f})")
         else:
             patience_counter += 1
@@ -532,11 +561,8 @@ def train(config):
     # Load best model for evaluation
     print("\n[5/5] Evaluating best model...")
     print("-" * 60)
-    
-    checkpoint = torch.load(
-        os.path.join(config['model_save_path'], config['best_model_name']),
-        weights_only=False
-    )
+
+    checkpoint = torch.load(checkpoint_path, weights_only=False)
     model.load_state_dict(checkpoint['model_state_dict'])
     
     # Load target scaler for inverse transform
@@ -560,9 +586,11 @@ def train(config):
     
     print("\n" + "=" * 60)
     print("Training complete!")
-    print(f"Best model saved to: {config['model_save_path']}{config['best_model_name']}")
+    print(f"Best model saved to: {checkpoint_path}")
+    print(f"Architecture: {config.get('architecture_name', 'N/A')}")
+    print(f"Hardware: {config.get('hardware_tag', 'N/A')}")
     print("=" * 60)
-    
+
     return model, history, metrics
 
 
