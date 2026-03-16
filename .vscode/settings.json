@@ -1,4 +1,8 @@
 {
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/*.pyc": true
+  },
   "files.watcherExclude": {
     "**/data/**": true,
     "**/.venv/**": true,
@@ -7,7 +11,8 @@
     "**/*.npy": true,
     "**/*.pt": true,
     "**/*.pth": true,
-    "**/*.ckpt": true
+    "**/*.ckpt": true,
+    "**/*.pyc": true
   },
   "search.exclude": {
     "**/data/**": true,
@@ -23,5 +28,8 @@
   ],
   "python.analysis.autoImportCompletions": false,
   "python.linting.enabled": true,
-  "python.linting.pylintEnabled": false
+  "python.linting.pylintEnabled": false,
+  "terminal.integrated.env.windows": {
+    "PYTHONDONTWRITEBYTECODE": "1"
+  }
 }

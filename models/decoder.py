@@ -170,3 +170,159 @@ class GraphLSTMDecoder(nn.Module):
             horizon=horizon,
             teacher_forcing_ratio=0.0
         )
+
+
+class DirectMultiHorizonDecoder(nn.Module):
+    """
+    Direct multi-horizon decoder: predicts all future steps jointly.
+
+    Each horizon step t has a learnable query embedding. For each step:
+    1. Combine the step-specific query with the final encoder hidden state.
+    2. Attend over the full encoder output sequence (temporal context).
+    3. Process the attended context through Graph-LSTM layers, initialized
+       from the encoder's final hidden states.
+    4. Project to scalar PM2.5 per node.
+
+    Steps are fully independent of each other — there is no autoregressive
+    feedback from step t-1 to step t. This eliminates error accumulation
+    and is the architectural fix for long-horizon degradation.
+    """
+
+    def __init__(
+        self,
+        output_dim,
+        hidden_dim,
+        num_nodes,
+        horizon,
+        num_layers=2,
+        num_heads=4,
+        dropout=0.1
+    ):
+        super().__init__()
+        self.output_dim = output_dim
+        self.hidden_dim = hidden_dim
+        self.num_nodes = num_nodes
+        self.horizon = horizon
+        self.num_layers = num_layers
+
+        # Learnable step query embeddings: one per forecast horizon step
+        # Each embedding gives the decoder a distinct "intent" for that future step
+        self.step_queries = nn.Parameter(torch.empty(horizon, hidden_dim))
+        nn.init.xavier_uniform_(self.step_queries)
+
+        # Multi-head attention over encoder outputs (shared across horizon steps)
+        self.attention = MultiHeadAttention(
+            hidden_dim=hidden_dim,
+            num_heads=num_heads,
+            dropout=dropout
+        )
+
+        # Project [query || context] -> hidden_dim
+        self.context_proj = nn.Linear(hidden_dim * 2, hidden_dim)
+
+        # Shared Graph-LSTM layers applied independently per horizon step
+        self.layers = nn.ModuleList([
+            GraphLSTMCell(
+                input_dim=hidden_dim,
+                hidden_dim=hidden_dim,
+                num_nodes=num_nodes
+            )
+            for _ in range(num_layers)
+        ])
+
+        self.layer_norms = nn.ModuleList([
+            nn.LayerNorm(hidden_dim) for _ in range(num_layers)
+        ])
+
+        # Scalar output per node
+        self.output_proj = nn.Linear(hidden_dim, output_dim)
+
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(
+        self,
+        encoder_outputs,
+        hidden_states,
+        adj,
+        target=None,
+        horizon=None,
+        teacher_forcing_ratio=0.0  # ignored — no autoregression
+    ):
+        """
+        Args:
+            encoder_outputs: (batch, enc_seq_len, num_nodes, hidden_dim)
+            hidden_states:   list of (h, c) tuples per encoder layer
+            adj:             adjacency matrix — static (N,N) or dynamic (B,N,N)
+            target:          unused; kept for API compatibility with autoregressive decoder
+            horizon:         overrides self.horizon if given
+            teacher_forcing_ratio: ignored
+        Returns:
+            predictions:      (batch, horizon, num_nodes, output_dim)
+            attention_weights:(batch, horizon, num_heads, num_nodes, enc_seq_len)
+        """
+        if horizon is None:
+            horizon = self.horizon
+
+        batch_size = encoder_outputs.size(0)
+
+        # Final encoder hidden state (top layer) used as base query signal
+        final_h = hidden_states[-1][0]  # (batch, num_nodes, hidden_dim)
+
+        predictions = []
+        attention_weights_all = []
+
+        for t in range(horizon):
+            # Step-specific learned query, broadcast over batch and nodes
+            step_q = self.step_queries[t].view(1, 1, -1).expand(
+                batch_size, self.num_nodes, -1
+            )  # (batch, num_nodes, hidden_dim)
+
+            # Combine learnable step intent with encoder's final hidden state
+            query = step_q + final_h  # (batch, num_nodes, hidden_dim)
+
+            # Attend over the full encoder sequence
+            context, attn_weights = self.attention(
+                query=query,
+                key=encoder_outputs,
+                value=encoder_outputs
+            )
+            attention_weights_all.append(attn_weights)
+
+            # Fuse query and context
+            combined = torch.cat([query, context], dim=-1)  # (batch, num_nodes, hidden_dim*2)
+            combined = self.context_proj(combined)           # (batch, num_nodes, hidden_dim)
+            combined = self.dropout(combined)
+
+            # Process through Graph-LSTM layers.
+            # Each horizon step starts from the same encoder hidden states —
+            # there is no recurrent dependency between forecast steps.
+            layer_input = combined
+            for i, (layer, norm) in enumerate(zip(self.layers, self.layer_norms)):
+                h, c = hidden_states[i]
+                h_new, c_new = layer(layer_input, (h, c), adj)
+
+                # Residual connection (upper layers only)
+                if i > 0:
+                    h_new = h_new + layer_input
+
+                h_new = norm(h_new)
+                h_new = self.dropout(h_new)
+                layer_input = h_new
+
+            output = self.output_proj(layer_input)  # (batch, num_nodes, output_dim)
+            predictions.append(output)
+
+        # Stack to (batch, horizon, num_nodes, output_dim)
+        predictions = torch.stack(predictions, dim=1)
+        attention_weights_all = torch.stack(attention_weights_all, dim=1)
+
+        return predictions, attention_weights_all
+
+    def inference(self, encoder_outputs, hidden_states, adj, horizon=6):
+        """Inference mode (identical to forward — no teacher forcing to disable)."""
+        return self.forward(
+            encoder_outputs=encoder_outputs,
+            hidden_states=hidden_states,
+            adj=adj,
+            horizon=horizon
+        )

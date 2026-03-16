@@ -63,7 +63,7 @@ Architecture:
 import torch
 import torch.nn as nn
 from .encoder import GraphLSTMEncoder
-from .decoder import GraphLSTMDecoder
+from .decoder import GraphLSTMDecoder, DirectMultiHorizonDecoder
 
 
 class GCNLSTMModel(nn.Module):
@@ -83,6 +83,9 @@ class GCNLSTMModel(nn.Module):
         num_layers: Number of Graph LSTM layers in encoder/decoder
         num_heads: Number of attention heads
         dropout: Dropout probability
+        horizon: Forecast horizon (required when use_direct_decoding=True)
+        use_direct_decoding: If True, use DirectMultiHorizonDecoder instead of the
+            autoregressive GraphLSTMDecoder. Eliminates error accumulation toward +6h.
     """
     
     def __init__(
@@ -93,7 +96,9 @@ class GCNLSTMModel(nn.Module):
         num_nodes,
         num_layers=2,
         num_heads=4,
-        dropout=0.1
+        dropout=0.1,
+        horizon=6,
+        use_direct_decoding=False
     ):
         super().__init__()
         
@@ -102,6 +107,7 @@ class GCNLSTMModel(nn.Module):
         self.output_dim = output_dim
         self.num_nodes = num_nodes
         self.num_layers = num_layers
+        self.use_direct_decoding = use_direct_decoding
         
         # Encoder: Stacked Graph LSTM layers
         self.encoder = GraphLSTMEncoder(
@@ -112,15 +118,27 @@ class GCNLSTMModel(nn.Module):
             dropout=dropout
         )
         
-        # Decoder: Graph LSTM + Multi-Head Attention
-        self.decoder = GraphLSTMDecoder(
-            output_dim=output_dim,
-            hidden_dim=hidden_dim,
-            num_nodes=num_nodes,
-            num_layers=num_layers,
-            num_heads=num_heads,
-            dropout=dropout
-        )
+        if use_direct_decoding:
+            # Direct multi-horizon decoder: all steps predicted jointly, no autoregression
+            self.decoder = DirectMultiHorizonDecoder(
+                output_dim=output_dim,
+                hidden_dim=hidden_dim,
+                num_nodes=num_nodes,
+                horizon=horizon,
+                num_layers=num_layers,
+                num_heads=num_heads,
+                dropout=dropout
+            )
+        else:
+            # Autoregressive decoder: each step feeds into the next
+            self.decoder = GraphLSTMDecoder(
+                output_dim=output_dim,
+                hidden_dim=hidden_dim,
+                num_nodes=num_nodes,
+                num_layers=num_layers,
+                num_heads=num_heads,
+                dropout=dropout
+            )
     
     def forward(self, x, adj, target=None, horizon=6, teacher_forcing_ratio=0.5):
         """
@@ -205,5 +223,7 @@ def create_model(config):
         num_nodes=config.get('num_nodes', 12),
         num_layers=config.get('num_layers', 2),
         num_heads=config.get('num_heads', 4),
-        dropout=config.get('dropout', 0.1)
+        dropout=config.get('dropout', 0.1),
+        horizon=config.get('horizon', 6),
+        use_direct_decoding=config.get('use_direct_decoding', False)
     )

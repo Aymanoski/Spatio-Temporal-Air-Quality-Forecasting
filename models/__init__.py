@@ -10,7 +10,7 @@ Components:
 
 from .layers import GraphConvolution, GraphLSTMCell, MultiHeadAttention
 from .encoder import GraphLSTMEncoder
-from .decoder import GraphLSTMDecoder
+from .decoder import GraphLSTMDecoder, DirectMultiHorizonDecoder
 from .model import GCNLSTMModel, create_model
 
 __all__ = [
@@ -19,6 +19,7 @@ __all__ = [
     'MultiHeadAttention',
     'GraphLSTMEncoder',
     'GraphLSTMDecoder',
+    'DirectMultiHorizonDecoder',
     'GCNLSTMModel',
     'create_model'
 ]

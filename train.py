@@ -33,6 +33,7 @@ CONFIG = {
     'num_layers': 2,        # Number of Graph LSTM layers
     'num_heads': 4,         # Attention heads
     'dropout': 0.1,
+    'use_direct_decoding': True,  # Direct multi-horizon decoding (no autoregression)
     
     # Training
     'batch_size': 32,
@@ -419,7 +420,9 @@ def train(config):
         num_nodes=config['num_nodes'],
         num_layers=config['num_layers'],
         num_heads=config['num_heads'],
-        dropout=config['dropout']
+        dropout=config['dropout'],
+        horizon=config['horizon'],
+        use_direct_decoding=config.get('use_direct_decoding', False)
     ).to(device)
     
     print(f"  Model parameters: {model.get_num_params():,}")

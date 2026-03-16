@@ -69,7 +69,9 @@ def load_model(model_path):
         num_nodes=config['num_nodes'],
         num_layers=config['num_layers'],
         num_heads=config['num_heads'],
-        dropout=config['dropout']
+        dropout=config['dropout'],
+        horizon=config.get('horizon', 6),
+        use_direct_decoding=config.get('use_direct_decoding', False)
     )
     
     model.load_state_dict(checkpoint['model_state_dict'])
