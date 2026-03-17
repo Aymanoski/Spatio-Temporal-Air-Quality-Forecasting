@@ -40,16 +40,29 @@ CONFIG = {
     'learning_rate': 1e-3,
     'weight_decay': 1e-5,
     'epochs': 100,
-    'patience': 15,          # Early stopping patience
+    'patience': 25,          # Early stopping patience (increased for lambda adaptation)
     'teacher_forcing_start': 1.0,  # Initial teacher forcing ratio
     'teacher_forcing_end': 0.0,    # Final teacher forcing ratio
 
     # Loss
     'loss_type': 'evt_hybrid',     # Options: 'mse' or 'evt_hybrid'
-    'evt_lambda': 0.05,            # Weight of EVT tail component
+    'evt_lambda': 0.05,            # Base weight of EVT tail component (used if no schedule)
     'evt_tail_quantile': 0.90,     # Threshold quantile for extremes
     'evt_xi': 0.10,                # GPD shape parameter
     'evt_threshold': None,         # Populated from training targets
+
+    # EVT Improvements: Asymmetric Penalty + Adaptive Lambda
+    'evt_asymmetric_penalty': True,         # Penalize under-prediction more than over-prediction
+    'evt_under_penalty_multiplier': 2.0,    # Multiplier for under-prediction errors
+    'evt_use_lambda_schedule': True,        # Use adaptive lambda scheduling
+    'evt_lambda_schedule': {
+        'initial': 0.05,     # Epochs 1-25: Learn general patterns (extended warmup)
+        'mid': 0.12,         # Epochs 26-50: Gentle increase in extreme focus
+        'final': 0.25,       # Epochs 51+: Moderate extreme emphasis (less aggressive)
+        'warmup_epochs': 25, # Extended warmup period
+        'mid_epochs': 50,    # Slower transition to final
+        'transition': 'smooth'  # 'smooth' for gradual, 'step' for abrupt changes
+    },
 
     # Wind-aware adjacency
     'use_wind_adjacency': True,    # Use dynamic wind-aware adjacency
@@ -72,8 +85,8 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'gcn_lstm_v1',     # Change this for different architectures
-    'hardware_tag': 'integrated_gpu',       # Options: 'integrated_gpu', 'colab_t4', 'rtx3090', etc.
+    'architecture_name': 'gcn_lstm_v3',     # v3: v2 + asymmetric penalty + adaptive lambda
+    'hardware_tag': 'T4',       # Options: 'integrated_gpu', 'T4', 'rtx3090', etc.
     'use_versioned_checkpoint': True,       # If True, saves as <arch>_<hardware>_best.pt
 
     # Resume training
@@ -82,40 +95,108 @@ CONFIG = {
 
 
 class EVTHybridLoss(nn.Module):
-    """Hybrid loss: standard MSE + Generalized Pareto tail-aware penalty."""
+    """
+    Hybrid loss: standard MSE + EVT tail-aware penalty.
 
-    def __init__(self, threshold, lambda_tail=0.05, xi=0.10, eps=1e-6):
+    Penalizes errors more heavily for extreme values above the threshold.
+    Uses a power-law penalty inspired by GPD to emphasize extreme value errors.
+
+    Improvements:
+    - Asymmetric penalty: under-predictions penalized more than over-predictions
+    - Adaptive lambda: can be adjusted during training via set_lambda()
+    """
+
+    def __init__(self, threshold, lambda_tail=0.05, xi=0.10, eps=1e-6,
+                 asymmetric_penalty=False, under_penalty_multiplier=2.0):
         super().__init__()
         self.threshold = float(threshold)
         self.lambda_tail = float(lambda_tail)
         self.xi = float(xi)
         self.eps = float(eps)
+        self.asymmetric_penalty = asymmetric_penalty
+        self.under_penalty_multiplier = float(under_penalty_multiplier)
 
-    def _gpd_nll(self, excess):
-        """Negative log-likelihood of exceedances under a fixed-xi GPD."""
-        scale = excess + self.eps
-
-        if abs(self.xi) < 1e-8:
-            return torch.log(scale) + excess / scale
-
-        t = 1.0 + (self.xi * excess) / scale
-        return torch.log(scale) + (1.0 / self.xi + 1.0) * torch.log(torch.clamp(t, min=self.eps))
+    def set_lambda(self, new_lambda):
+        """Update lambda weight (for adaptive scheduling)."""
+        self.lambda_tail = float(new_lambda)
 
     def forward(self, predictions, targets):
+        # Base MSE loss for all predictions
         mse = F.mse_loss(predictions, targets)
 
+        # Identify extreme values (above threshold)
         threshold = targets.new_tensor(self.threshold)
-        target_excess = targets - threshold
-        pred_excess = F.relu(predictions - threshold)
+        mask = targets > threshold
 
-        mask = target_excess > 0
         if mask.any():
-            excess_error = torch.abs(pred_excess[mask] - target_excess[mask])
-            tail_loss = self._gpd_nll(excess_error).mean()
-        else:
-            tail_loss = mse.new_zeros(())
+            # Get predictions and targets for extreme values
+            extreme_preds = predictions[mask]
+            extreme_targets = targets[mask]
 
+            # Compute excesses over threshold
+            target_excess = extreme_targets - threshold
+            pred_excess = torch.clamp(extreme_preds - threshold, min=0.0)  # Ensure non-negative
+
+            # Weighted MSE on excesses
+            # For extreme values, errors are weighted more heavily
+            # Weight increases with the magnitude of the excess
+            excess_weight = 1.0 + self.xi * target_excess / (target_excess.mean() + self.eps)
+
+            # Asymmetric penalty: penalize under-prediction more
+            if self.asymmetric_penalty:
+                # Under-prediction: predicted excess < target excess
+                under_mask = pred_excess < target_excess
+                excess_weight = excess_weight.clone()  # Avoid in-place modification
+                excess_weight[under_mask] *= self.under_penalty_multiplier
+
+            weighted_excess_error = excess_weight * (pred_excess - target_excess) ** 2
+            tail_loss = weighted_excess_error.mean()
+        else:
+            tail_loss = torch.zeros(1, device=predictions.device, dtype=predictions.dtype)
+
+        # Combine MSE + weighted tail penalty
         return mse + self.lambda_tail * tail_loss
+
+
+def get_evt_lambda_for_epoch(epoch, schedule_config, total_epochs):
+    """
+    Calculate EVT lambda for current epoch based on schedule.
+
+    Args:
+        epoch: Current epoch (0-indexed)
+        schedule_config: Dictionary with schedule parameters
+        total_epochs: Total number of training epochs
+
+    Returns:
+        lambda value for current epoch
+    """
+    initial = schedule_config['initial']
+    mid = schedule_config['mid']
+    final = schedule_config['final']
+    warmup_epochs = schedule_config.get('warmup_epochs', 20)
+    mid_epochs = schedule_config.get('mid_epochs', 40)
+    transition = schedule_config.get('transition', 'smooth')
+
+    if epoch < warmup_epochs:
+        # Warmup phase: stay at initial lambda
+        return initial
+    elif epoch < mid_epochs:
+        # Transition from initial to mid
+        if transition == 'smooth':
+            # Linear interpolation
+            progress = (epoch - warmup_epochs) / (mid_epochs - warmup_epochs)
+            return initial + (mid - initial) * progress
+        else:  # step
+            return mid
+    else:
+        # Transition from mid to final
+        if transition == 'smooth':
+            # Linear interpolation
+            progress = (epoch - mid_epochs) / max(total_epochs - mid_epochs, 1)
+            progress = min(progress, 1.0)  # Cap at 1.0
+            return mid + (final - mid) * progress
+        else:  # step
+            return final
 
 
 # ============================================================================
@@ -434,16 +515,38 @@ def train(config):
     
     # Loss and optimizer
     if config.get('loss_type', 'mse') == 'evt_hybrid':
+        # Determine initial lambda (may be adjusted by schedule)
+        if config.get('evt_use_lambda_schedule', False):
+            initial_lambda = config['evt_lambda_schedule']['initial']
+        else:
+            initial_lambda = config['evt_lambda']
+
         criterion = EVTHybridLoss(
             threshold=config['evt_threshold'],
-            lambda_tail=config['evt_lambda'],
-            xi=config['evt_xi']
+            lambda_tail=initial_lambda,
+            xi=config['evt_xi'],
+            asymmetric_penalty=config.get('evt_asymmetric_penalty', False),
+            under_penalty_multiplier=config.get('evt_under_penalty_multiplier', 2.0)
         )
+
+        # Print configuration
         print(
-            f"  Loss: EVT Hybrid (lambda={config['evt_lambda']}, "
+            f"  Loss: EVT Hybrid (lambda={initial_lambda}, "
             f"q={config['evt_tail_quantile']}, xi={config['evt_xi']}, "
             f"threshold={config['evt_threshold']:.4f})"
         )
+
+        if config.get('evt_asymmetric_penalty', False):
+            print(
+                f"  Asymmetric Penalty: ON (under-prediction multiplier={config.get('evt_under_penalty_multiplier', 2.0)}x)"
+            )
+
+        if config.get('evt_use_lambda_schedule', False):
+            sched = config['evt_lambda_schedule']
+            print(
+                f"  Adaptive Lambda Schedule: {sched['initial']} -> {sched['mid']} -> {sched['final']} "
+                f"(warmup={sched['warmup_epochs']}, mid={sched['mid_epochs']}, {sched['transition']})"
+            )
     else:
         criterion = nn.MSELoss()
         print("  Loss: MSE")
@@ -495,32 +598,52 @@ def train(config):
     
     for epoch in range(start_epoch, config['epochs']):
         start_time = time.time()
-        
+
+        # Update EVT lambda if using adaptive schedule
+        if config.get('loss_type', 'mse') == 'evt_hybrid' and config.get('evt_use_lambda_schedule', False):
+            new_lambda = get_evt_lambda_for_epoch(
+                epoch,
+                config['evt_lambda_schedule'],
+                config['epochs']
+            )
+            criterion.set_lambda(new_lambda)
+
+            # Log lambda changes (only when it actually changes)
+            if epoch == 0 or epoch == config['evt_lambda_schedule'].get('warmup_epochs', 20) or \
+               epoch == config['evt_lambda_schedule'].get('mid_epochs', 40):
+                print(f"  -> EVT lambda updated to {new_lambda:.4f} at epoch {epoch+1}")
+
         # Calculate teacher forcing ratio (linear decay)
         tf_ratio = config['teacher_forcing_start'] - \
                    (config['teacher_forcing_start'] - config['teacher_forcing_end']) * \
                    (epoch / config['epochs'])
-        
+
         # Train
         train_loss = train_epoch(
             model, train_loader, optimizer, criterion, adj, config, tf_ratio
         )
-        
+
         # Validate
         val_loss = validate(model, val_loader, criterion, adj, config)
-        
+
         # Update scheduler
         scheduler.step(val_loss)
-        
+
         # Record history
         history['train_loss'].append(train_loss)
         history['val_loss'].append(val_loss)
-        
+
         elapsed = time.time() - start_time
-        
+
+        # Display current lambda if using schedule
+        lambda_str = ""
+        if config.get('loss_type', 'mse') == 'evt_hybrid' and config.get('evt_use_lambda_schedule', False):
+            lambda_str = f"λ: {criterion.lambda_tail:.3f} | "
+
         print(f"Epoch {epoch+1:3d}/{config['epochs']} | "
               f"Train Loss: {train_loss:.6f} | "
               f"Val Loss: {val_loss:.6f} | "
+              f"{lambda_str}"
               f"TF: {tf_ratio:.2f} | "
               f"Time: {elapsed:.1f}s")
         
