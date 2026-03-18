@@ -127,7 +127,8 @@ class GCNLSTMModel(nn.Module):
                 horizon=horizon,
                 num_layers=num_layers,
                 num_heads=num_heads,
-                dropout=dropout
+                dropout=dropout,
+                max_horizon=max(horizon, 24)  # Support up to 24h forecasts
             )
         else:
             # Autoregressive decoder: each step feeds into the next

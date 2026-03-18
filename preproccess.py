@@ -157,34 +157,15 @@ def create_tensor(df):
 
 def normalize_tensor(tensor, feature_cols):
     """
-    Normalize tensor features. 
-    Returns separate scalers for target (PM2.5) and other features.
+    NOTE: This function is deprecated for training.
+    Scaling should be done in train.py to avoid data leakage.
+
+    This function is kept for reference/debugging only.
+    Returns the UNSCALED tensor and None scalers.
     """
-    T, N, F = tensor.shape
-
-    # Reshape for scaling: (T*N, F)
-    flat = tensor.reshape(-1, F)
-
-    # Target scaler (PM2.5 at index 0)
-    target_scaler = MinMaxScaler()
-    flat[:, 0:1] = target_scaler.fit_transform(flat[:, 0:1])
-
-    # Feature scaler (all other numeric features, excluding wind one-hot)
-    wind_start_idx = next(
-        (i for i, c in enumerate(feature_cols) if c.startswith("wd_")),
-        F
-    )
-    
-    if wind_start_idx > 1:
-        feature_scaler = MinMaxScaler()
-        flat[:, 1:wind_start_idx] = feature_scaler.fit_transform(flat[:, 1:wind_start_idx])
-    else:
-        feature_scaler = None
-
-    # Reshape back
-    tensor = flat.reshape(T, N, F)
-
-    return tensor, target_scaler, feature_scaler
+    # Return unscaled tensor - scaling will be done in train.py
+    # to prevent data leakage (test data stats leaking into training)
+    return tensor, None, None
 
 
 def check_missing_hours(timestamps):

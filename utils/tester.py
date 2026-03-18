@@ -152,7 +152,12 @@ def build_dynamic_adjacency(X_batch, config, device):
         wind_directions=wind_directions,
         wind_categories=WIND_CATEGORIES,
         alpha=config.get('wind_alpha', 0.6),
-        distance_sigma=config.get('distance_sigma', 100)
+        distance_sigma=config.get('distance_sigma', 100),
+        aggregation_mode=config.get('wind_aggregation_mode', 'recent_weighted'),
+        recency_beta=config.get('wind_recency_beta', 3.0),
+        direction_method=config.get('wind_direction_method', 'circular'),
+        normalization=config.get('wind_normalization', 'row'),
+        calm_speed_threshold=config.get('wind_calm_speed_threshold', 0.1)
     )
 
     # Convert to tensor

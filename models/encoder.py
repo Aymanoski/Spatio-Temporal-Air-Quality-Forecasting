@@ -90,30 +90,30 @@ class GraphLSTMEncoder(nn.Module):
         for t in range(seq_len):
             # Current input: (batch, num_nodes, hidden_dim)
             layer_input = x[:, t, :, :]
-            
-            # Pass through each Graph LSTM layer
+
+            # Pass through each Graph LSTM layer with Pre-LN pattern
             for i, (layer, norm) in enumerate(zip(self.layers, self.layer_norms)):
                 h, c = hidden_states[i]
-                
+
+                # Pre-LN: normalize BEFORE the layer (more stable training)
+                layer_input_norm = norm(layer_input)
+
                 # Graph LSTM cell forward
-                h_new, c_new = layer(layer_input, (h, c), adj)
-                
-                # Residual connection (skip first layer since dimensions may differ)
+                h_new, c_new = layer(layer_input_norm, (h, c), adj)
+
+                # Residual connection (skip first layer since input projection changes dims)
                 if i > 0:
                     h_new = h_new + layer_input
-                
-                # Layer normalization
-                h_new = norm(h_new)
-                
-                # Dropout
+
+                # Dropout after residual
                 h_new = self.dropout(h_new)
-                
+
                 # Update hidden state
                 hidden_states[i] = (h_new, c_new)
-                
+
                 # Output of this layer is input to next layer
                 layer_input = h_new
-            
+
             # Store final layer output for this timestep
             encoder_outputs.append(layer_input)
         

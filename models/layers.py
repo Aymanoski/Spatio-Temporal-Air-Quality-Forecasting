@@ -101,10 +101,11 @@ class GraphLSTMCell(nn.Module):
             h_new, c_new: Updated hidden and cell states
         """
         h, c = hidden
-        
+
         # Apply GCN to input and hidden state (spatial aggregation)
-        x_gcn = F.relu(self.gcn_i(x, adj))  # (batch, num_nodes, hidden_dim)
-        h_gcn = F.relu(self.gcn_h(h, adj))  # (batch, num_nodes, hidden_dim)
+        # Using LeakyReLU to prevent dead neurons and improve gradient flow
+        x_gcn = F.leaky_relu(self.gcn_i(x, adj), negative_slope=0.1)  # (batch, num_nodes, hidden_dim)
+        h_gcn = F.leaky_relu(self.gcn_h(h, adj), negative_slope=0.1)  # (batch, num_nodes, hidden_dim)
         
         # Concatenate for gate computation
         combined = torch.cat([x_gcn, h_gcn], dim=-1)  # (batch, num_nodes, hidden_dim*2)

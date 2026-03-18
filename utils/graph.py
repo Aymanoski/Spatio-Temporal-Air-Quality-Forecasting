@@ -87,6 +87,135 @@ def wind_direction_to_angle(wind_one_hot, wind_categories):
     return WIND_DIRECTION_MAP.get(category, -1)
 
 
+def angle_to_nearest_category_one_hot(angle, wind_categories):
+    """Map a continuous angle to the nearest categorical wind direction (one-hot)."""
+    if angle < 0:
+        # Calm/variable fallback: uniform-like weak prior on "N"
+        one_hot = np.zeros(len(wind_categories), dtype=np.float32)
+        if "N" in wind_categories:
+            one_hot[wind_categories.index("N")] = 1.0
+        return one_hot
+
+    min_diff = float("inf")
+    best_idx = 0
+    for idx, category in enumerate(wind_categories):
+        ref_angle = WIND_DIRECTION_MAP.get(category, 0.0)
+        diff = abs(ref_angle - angle)
+        if diff > 180:
+            diff = 360 - diff
+        if diff < min_diff:
+            min_diff = diff
+            best_idx = idx
+
+    one_hot = np.zeros(len(wind_categories), dtype=np.float32)
+    one_hot[best_idx] = 1.0
+    return one_hot
+
+
+def _temporal_weights(timesteps, mode="recent_weighted", recency_beta=3.0):
+    """Create temporal aggregation weights for a history window."""
+    if timesteps <= 0:
+        raise ValueError("timesteps must be > 0")
+
+    if mode == "last":
+        w = np.zeros(timesteps, dtype=np.float32)
+        w[-1] = 1.0
+        return w
+
+    if mode == "mean":
+        return np.full(timesteps, 1.0 / timesteps, dtype=np.float32)
+
+    # recent_weighted (default): exponential increase toward latest timestep
+    t = np.linspace(0.0, 1.0, timesteps, dtype=np.float32)
+    w = np.exp(recency_beta * t)
+    w = w / np.sum(w)
+    return w.astype(np.float32)
+
+
+def aggregate_wind_over_time(
+    wind_speeds,
+    wind_directions,
+    wind_categories,
+    mode="recent_weighted",
+    recency_beta=3.0,
+    direction_method="circular",
+    calm_speed_threshold=0.1
+):
+    """
+    Aggregate temporal wind inputs for one sample.
+
+    Args:
+        wind_speeds: (timesteps, nodes)
+        wind_directions: (timesteps, nodes, categories)
+        mode: 'mean', 'last', or 'recent_weighted'
+        recency_beta: strength of recent-weight emphasis for 'recent_weighted'
+        direction_method: 'argmax_mean' or 'circular'
+        calm_speed_threshold: threshold under which angle is treated as calm/variable
+
+    Returns:
+        agg_speeds: (nodes,)
+        agg_dirs_one_hot: (nodes, categories)
+        agg_angles: (nodes,)
+    """
+    timesteps, num_nodes = wind_speeds.shape
+    _, _, num_categories = wind_directions.shape
+
+    weights = _temporal_weights(timesteps, mode=mode, recency_beta=recency_beta)
+
+    agg_speeds = np.tensordot(weights, wind_speeds, axes=(0, 0)).astype(np.float32)
+
+    if direction_method == "argmax_mean":
+        mean_dirs = np.tensordot(weights, wind_directions, axes=(0, 0))
+        agg_dirs_one_hot = np.zeros((num_nodes, num_categories), dtype=np.float32)
+        best_idx = np.argmax(mean_dirs, axis=-1)
+        agg_dirs_one_hot[np.arange(num_nodes), best_idx] = 1.0
+        agg_angles = np.array(
+            [wind_direction_to_angle(agg_dirs_one_hot[n], wind_categories) for n in range(num_nodes)],
+            dtype=np.float32
+        )
+        return agg_speeds, agg_dirs_one_hot, agg_angles
+
+    # circular (default): robust angular aggregation with periodicity awareness
+    raw_angles = np.zeros((timesteps, num_nodes), dtype=np.float32)
+    for t in range(timesteps):
+        for n in range(num_nodes):
+            raw_angles[t, n] = wind_direction_to_angle(wind_directions[t, n], wind_categories)
+
+    agg_angles = np.zeros(num_nodes, dtype=np.float32)
+    agg_dirs_one_hot = np.zeros((num_nodes, num_categories), dtype=np.float32)
+
+    for n in range(num_nodes):
+        # Combine temporal recency and wind intensity so strong, recent winds dominate
+        node_speeds = np.maximum(wind_speeds[:, n], 0.0)
+        dir_weights = weights * (0.5 + node_speeds)
+        dir_weights_sum = np.sum(dir_weights)
+        if dir_weights_sum <= 0:
+            dir_weights = weights
+            dir_weights_sum = np.sum(dir_weights)
+        dir_weights = dir_weights / dir_weights_sum
+
+        x = 0.0
+        y = 0.0
+        for t in range(timesteps):
+            angle = raw_angles[t, n]
+            if angle < 0:
+                continue
+            rad = np.radians(angle)
+            x += dir_weights[t] * np.cos(rad)
+            y += dir_weights[t] * np.sin(rad)
+
+        if agg_speeds[n] < calm_speed_threshold or (abs(x) < 1e-6 and abs(y) < 1e-6):
+            agg_angles[n] = -1.0
+            agg_dirs_one_hot[n] = angle_to_nearest_category_one_hot(-1.0, wind_categories)
+        else:
+            angle = np.degrees(np.arctan2(y, x))
+            angle = (angle + 360.0) % 360.0
+            agg_angles[n] = angle
+            agg_dirs_one_hot[n] = angle_to_nearest_category_one_hot(angle, wind_categories)
+
+    return agg_speeds, agg_dirs_one_hot, agg_angles
+
+
 def compute_wind_alignment(wind_angle, bearing, wind_speed):
     """
     Compute alignment factor between wind direction and station-to-station bearing.
@@ -123,7 +252,7 @@ def compute_wind_alignment(wind_angle, bearing, wind_speed):
 
 
 def build_adjacency():
-    """Build static distance-based adjacency matrix."""
+    """Build static distance-based adjacency matrix with self-loops."""
     station_names = list(STATIONS.keys())
     n = len(station_names)
 
@@ -138,16 +267,27 @@ def build_adjacency():
                 )
                 A[i, j] = np.exp(-d**2 / 100)
 
+    # Add self-loops (critical for GCN - nodes must aggregate their own features)
+    A = A + np.eye(n)
+
+    # Symmetric normalization: D^{-1/2} (A + I) D^{-1/2}
     D = np.diag(np.sum(A, axis=1))
-    D_inv_sqrt = np.linalg.inv(np.sqrt(D))
+    D_inv_sqrt = np.diag(1.0 / np.sqrt(np.diag(D)))
     A_hat = D_inv_sqrt @ A @ D_inv_sqrt
 
     np.save("../data/processed/adjacency.npy", A_hat)
     print("Adjacency matrix saved.")
 
 
-def build_wind_aware_adjacency(wind_speeds, wind_directions, wind_categories,
-                                alpha=0.6, distance_sigma=100):
+def build_wind_aware_adjacency(
+    wind_speeds,
+    wind_directions,
+    wind_categories,
+    alpha=0.6,
+    distance_sigma=100,
+    normalization="row",
+    wind_angles=None
+):
     """
     Build dynamic wind-aware directed adjacency matrix.
 
@@ -155,11 +295,14 @@ def build_wind_aware_adjacency(wind_speeds, wind_directions, wind_categories,
         wind_speeds: (num_nodes,) array of wind speeds at each station
         wind_directions: (num_nodes, num_categories) array of one-hot wind directions
         wind_categories: List of wind direction category names in order
-        alpha: Weighting factor (0 to 1).
+         alpha: Weighting factor (0 to 1).
                alpha=1.0 means pure wind-based,
                alpha=0.0 means pure distance-based,
                alpha=0.6 is a balanced hybrid (recommended)
         distance_sigma: Distance decay parameter for Gaussian kernel
+         normalization: 'row' for directed row-stochastic, 'symmetric' for D^(-1/2) A D^(-1/2)
+         wind_angles: Optional continuous angles (num_nodes,). If provided, this
+                bypasses one-hot conversion and preserves angular fidelity.
 
     Returns:
         A_hat: (num_nodes, num_nodes) normalized directed adjacency matrix
@@ -185,13 +328,17 @@ def build_wind_aware_adjacency(wind_speeds, wind_directions, wind_categories,
 
     # Distance-based component (undirected)
     A_dist = np.exp(-dist_matrix**2 / distance_sigma)
-    np.fill_diagonal(A_dist, 0)
+    # Keep diagonal as 1.0 for self-loops (critical for GCN)
+    np.fill_diagonal(A_dist, 1.0)
 
     # Wind-based component (directed)
     A_wind = np.zeros((n, n))
 
     for i in range(n):
-        wind_angle = wind_direction_to_angle(wind_directions[i], wind_categories)
+        if wind_angles is not None:
+            wind_angle = float(wind_angles[i])
+        else:
+            wind_angle = wind_direction_to_angle(wind_directions[i], wind_categories)
         wind_speed = wind_speeds[i]
 
         for j in range(n):
@@ -202,21 +349,38 @@ def build_wind_aware_adjacency(wind_speeds, wind_directions, wind_categories,
                 # Combine alignment with distance decay
                 A_wind[i, j] = alignment * np.exp(-dist_matrix[i, j]**2 / distance_sigma)
 
+    # Add self-loops to wind component (nodes retain their own information)
+    np.fill_diagonal(A_wind, 1.0)
+
     # Hybrid adjacency: combine distance-based and wind-based
     A = (1 - alpha) * A_dist + alpha * A_wind
 
-    # Normalize using degree matrix (symmetric normalization)
-    row_sum = np.sum(A, axis=1)
-    row_sum[row_sum == 0] = 1  # Avoid division by zero
-    D_inv_sqrt = np.diag(1.0 / np.sqrt(row_sum))
+    # Normalize directed graph. Row-normalization preserves flow direction better.
+    row_sum = np.sum(A, axis=1, keepdims=True)
+    row_sum[row_sum == 0] = 1.0
 
-    A_hat = D_inv_sqrt @ A @ D_inv_sqrt
+    if normalization == "symmetric":
+        deg = row_sum.squeeze(-1)
+        D_inv_sqrt = np.diag(1.0 / np.sqrt(deg))
+        A_hat = D_inv_sqrt @ A @ D_inv_sqrt
+    else:
+        A_hat = A / row_sum
 
     return A_hat
 
 
-def build_wind_aware_adjacency_batch(wind_speeds, wind_directions, wind_categories,
-                                      alpha=0.6, distance_sigma=100):
+def build_wind_aware_adjacency_batch(
+    wind_speeds,
+    wind_directions,
+    wind_categories,
+    alpha=0.6,
+    distance_sigma=100,
+    aggregation_mode="recent_weighted",
+    recency_beta=3.0,
+    direction_method="circular",
+    normalization="row",
+    calm_speed_threshold=0.1
+):
     """
     Build wind-aware adjacency for a batch of timesteps.
 
@@ -239,26 +403,266 @@ def build_wind_aware_adjacency_batch(wind_speeds, wind_directions, wind_categori
     # Handle different input shapes
     if wind_speeds.ndim == 3:  # (batch, timesteps, nodes)
         batch_size, timesteps, num_nodes = wind_speeds.shape
-        # Average over timesteps for each station
-        wind_speeds = wind_speeds.mean(axis=1)  # (batch, nodes)
-        wind_directions = wind_directions.mean(axis=1)  # (batch, nodes, categories)
+        temporal_input = True
     elif wind_speeds.ndim == 2:  # (batch, nodes)
         batch_size, num_nodes = wind_speeds.shape
+        temporal_input = False
     else:
         raise ValueError(f"Unexpected wind_speeds shape: {wind_speeds.shape}")
 
     adjacency_batch = np.zeros((batch_size, num_nodes, num_nodes))
 
     for b in range(batch_size):
-        adjacency_batch[b] = build_wind_aware_adjacency(
-            wind_speeds[b],
-            wind_directions[b],
-            wind_categories,
-            alpha=alpha,
-            distance_sigma=distance_sigma
-        )
+        if temporal_input:
+            agg_speeds, agg_dirs, agg_angles = aggregate_wind_over_time(
+                wind_speeds[b],
+                wind_directions[b],
+                wind_categories,
+                mode=aggregation_mode,
+                recency_beta=recency_beta,
+                direction_method=direction_method,
+                calm_speed_threshold=calm_speed_threshold
+            )
+            adjacency_batch[b] = build_wind_aware_adjacency(
+                agg_speeds,
+                agg_dirs,
+                wind_categories,
+                alpha=alpha,
+                distance_sigma=distance_sigma,
+                normalization=normalization,
+                wind_angles=agg_angles
+            )
+        else:
+            adjacency_batch[b] = build_wind_aware_adjacency(
+                wind_speeds[b],
+                wind_directions[b],
+                wind_categories,
+                alpha=alpha,
+                distance_sigma=distance_sigma,
+                normalization=normalization,
+                wind_angles=None
+            )
 
     return adjacency_batch
+
+
+# ============================================================================
+# GPU-Optimized Adjacency Computation
+# ============================================================================
+
+# Precomputed static matrices (computed once, reused for all batches)
+_PRECOMPUTED_CACHE = {}
+
+
+def _precompute_static_matrices(device):
+    """
+    Precompute distance decay and bearing matrices on GPU.
+    These are static and only need to be computed once.
+    """
+    cache_key = str(device)
+    if cache_key in _PRECOMPUTED_CACHE:
+        return _PRECOMPUTED_CACHE[cache_key]
+
+    station_names = list(STATIONS.keys())
+    n = len(station_names)
+
+    # Compute distance and bearing matrices
+    dist_matrix = np.zeros((n, n), dtype=np.float32)
+    bearing_matrix = np.zeros((n, n), dtype=np.float32)
+
+    for i in range(n):
+        for j in range(n):
+            if i != j:
+                dist_matrix[i, j] = haversine(
+                    STATIONS[station_names[i]],
+                    STATIONS[station_names[j]]
+                )
+                bearing_matrix[i, j] = compute_bearing(
+                    STATIONS[station_names[i]],
+                    STATIONS[station_names[j]]
+                )
+
+    # Convert to tensors on device
+    dist_tensor = torch.from_numpy(dist_matrix).to(device)
+    bearing_tensor = torch.from_numpy(bearing_matrix).to(device)
+
+    # Precompute wind category angles tensor
+    category_angles = torch.tensor(
+        [WIND_DIRECTION_MAP.get(cat, -1) for cat in WIND_CATEGORIES],
+        dtype=torch.float32,
+        device=device
+    )
+
+    _PRECOMPUTED_CACHE[cache_key] = {
+        'dist': dist_tensor,
+        'bearing': bearing_tensor,
+        'category_angles': category_angles,
+        'n_nodes': n
+    }
+
+    return _PRECOMPUTED_CACHE[cache_key]
+
+
+def build_wind_aware_adjacency_gpu(
+    wind_speeds,
+    wind_directions,
+    alpha=0.6,
+    distance_sigma=100.0,
+    calm_speed_threshold=0.1
+):
+    """
+    GPU-optimized wind-aware adjacency computation.
+
+    Args:
+        wind_speeds: (batch, num_nodes) tensor of aggregated wind speeds
+        wind_directions: (batch, num_nodes, num_categories) tensor of one-hot directions
+        alpha: Wind influence weight (0=distance-only, 1=wind-only)
+        distance_sigma: Distance decay parameter
+        calm_speed_threshold: Speed below which wind direction is ignored
+
+    Returns:
+        adj_batch: (batch, num_nodes, num_nodes) normalized adjacency tensor
+    """
+    device = wind_speeds.device
+    batch_size, num_nodes = wind_speeds.shape
+
+    # Get precomputed static matrices
+    static = _precompute_static_matrices(device)
+    dist = static['dist']  # (N, N)
+    bearing = static['bearing']  # (N, N)
+    category_angles = static['category_angles']  # (num_categories,)
+
+    # Convert one-hot to angles using circular mean approximation
+    # Get dominant direction via argmax
+    dominant_idx = wind_directions.argmax(dim=-1)  # (batch, nodes)
+    wind_angles = category_angles[dominant_idx]  # (batch, nodes)
+
+    # Mark calm winds as -1
+    calm_mask = wind_speeds < calm_speed_threshold
+    wind_angles = torch.where(calm_mask, torch.full_like(wind_angles, -1.0), wind_angles)
+
+    # Distance-based component (broadcasted for batch)
+    A_dist = torch.exp(-dist.pow(2) / distance_sigma)  # (N, N)
+    # Add self-loops
+    A_dist = A_dist + torch.eye(num_nodes, device=device)
+
+    # Wind-based component
+    # Transport direction is opposite of wind direction (wind FROM -> pollution TO)
+    transport_dir = (wind_angles + 180.0) % 360.0  # (batch, nodes)
+
+    # Compute alignment for all pairs
+    # bearing: (N, N), transport_dir: (batch, N) -> need (batch, N, N)
+    transport_expanded = transport_dir.unsqueeze(2)  # (batch, N, 1)
+    bearing_expanded = bearing.unsqueeze(0)  # (1, N, N)
+
+    angle_diff = torch.abs(transport_expanded - bearing_expanded)  # (batch, N, N)
+    angle_diff = torch.where(angle_diff > 180, 360 - angle_diff, angle_diff)
+
+    # Alignment: cosine falloff
+    alignment = (torch.cos(angle_diff * np.pi / 180.0) + 1) / 2  # (batch, N, N)
+
+    # Wind speed factor
+    wind_factor = torch.tanh(wind_speeds / 5.0)  # (batch, N)
+    wind_factor_expanded = wind_factor.unsqueeze(2)  # (batch, N, 1)
+
+    # Combined wind influence
+    A_wind = alignment * wind_factor_expanded * torch.exp(-dist.pow(2) / distance_sigma)
+
+    # Handle calm winds: set to neutral (0.5 * distance decay)
+    calm_expanded = calm_mask.unsqueeze(2)  # (batch, N, 1)
+    neutral_value = 0.5 * torch.exp(-dist.pow(2) / distance_sigma)
+    A_wind = torch.where(calm_expanded, neutral_value.unsqueeze(0), A_wind)
+
+    # Add self-loops to wind component
+    eye_batch = torch.eye(num_nodes, device=device).unsqueeze(0)  # (1, N, N)
+    A_wind = A_wind + eye_batch
+
+    # Hybrid adjacency
+    A = (1 - alpha) * A_dist.unsqueeze(0) + alpha * A_wind  # (batch, N, N)
+
+    # Row normalization
+    row_sum = A.sum(dim=-1, keepdim=True)
+    row_sum = row_sum.clamp(min=1e-8)
+    A_norm = A / row_sum
+
+    return A_norm
+
+
+def aggregate_wind_gpu(wind_speeds, wind_directions, mode="recent_weighted", recency_beta=3.0):
+    """
+    Aggregate wind over temporal dimension on GPU.
+
+    Args:
+        wind_speeds: (batch, timesteps, nodes) tensor
+        wind_directions: (batch, timesteps, nodes, categories) tensor
+        mode: Aggregation mode
+        recency_beta: Weight emphasis for recent timesteps
+
+    Returns:
+        agg_speeds: (batch, nodes) tensor
+        agg_dirs: (batch, nodes, categories) tensor
+    """
+    batch, timesteps, nodes = wind_speeds.shape
+    device = wind_speeds.device
+
+    # Create temporal weights
+    if mode == "last":
+        weights = torch.zeros(timesteps, device=device)
+        weights[-1] = 1.0
+    elif mode == "mean":
+        weights = torch.ones(timesteps, device=device) / timesteps
+    else:  # recent_weighted
+        t = torch.linspace(0, 1, timesteps, device=device)
+        weights = torch.exp(recency_beta * t)
+        weights = weights / weights.sum()
+
+    # Aggregate speeds: (batch, timesteps, nodes) @ (timesteps,) -> (batch, nodes)
+    agg_speeds = torch.einsum('btn,t->bn', wind_speeds, weights)
+
+    # Aggregate directions: weighted mean then argmax
+    # (batch, timesteps, nodes, cats) @ (timesteps,) -> (batch, nodes, cats)
+    agg_dirs = torch.einsum('btnc,t->bnc', wind_directions, weights)
+
+    return agg_speeds, agg_dirs
+
+
+def build_dynamic_adjacency_gpu(X_batch, config):
+    """
+    Build dynamic wind-aware adjacency on GPU (no CPU transfer).
+
+    Args:
+        X_batch: (batch, timesteps, num_nodes, features) tensor ON GPU
+        config: Configuration dict
+
+    Returns:
+        adj_batch: (batch, num_nodes, num_nodes) tensor ON GPU
+    """
+    wind_speed_idx = config['wind_speed_idx']
+    wind_dir_start = config['wind_dir_start_idx']
+    wind_dir_end = config['wind_dir_end_idx']
+
+    # Extract wind features
+    wind_speeds = X_batch[:, :, :, wind_speed_idx]  # (batch, timesteps, nodes)
+    wind_directions = X_batch[:, :, :, wind_dir_start:wind_dir_end]  # (batch, timesteps, nodes, cats)
+
+    # Aggregate over time
+    agg_speeds, agg_dirs = aggregate_wind_gpu(
+        wind_speeds,
+        wind_directions,
+        mode=config.get('wind_aggregation_mode', 'recent_weighted'),
+        recency_beta=config.get('wind_recency_beta', 3.0)
+    )
+
+    # Build adjacency
+    adj_batch = build_wind_aware_adjacency_gpu(
+        agg_speeds,
+        agg_dirs,
+        alpha=config['wind_alpha'],
+        distance_sigma=config['distance_sigma'],
+        calm_speed_threshold=config.get('wind_calm_speed_threshold', 0.1)
+    )
+
+    return adj_batch
 
 
 if __name__ == "__main__":

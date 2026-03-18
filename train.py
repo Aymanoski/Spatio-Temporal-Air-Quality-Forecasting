@@ -12,8 +12,13 @@ import numpy as np
 import os
 import time
 import joblib
+from sklearn.preprocessing import MinMaxScaler
 from models import GCNLSTMModel
-from utils.graph import build_wind_aware_adjacency_batch, WIND_CATEGORIES
+from utils.graph import (
+    build_wind_aware_adjacency_batch,
+    build_dynamic_adjacency_gpu,
+    WIND_CATEGORIES
+)
 
 # ============================================================================
 # Configuration
@@ -40,7 +45,7 @@ CONFIG = {
     'learning_rate': 1e-3,
     'weight_decay': 1e-5,
     'epochs': 100,
-    'patience': 25,          # Early stopping patience (increased for lambda adaptation)
+    'patience': 15,          # Early stopping patience (back to original)
     'teacher_forcing_start': 1.0,  # Initial teacher forcing ratio
     'teacher_forcing_end': 0.0,    # Final teacher forcing ratio
 
@@ -51,10 +56,10 @@ CONFIG = {
     'evt_xi': 0.10,                # GPD shape parameter
     'evt_threshold': None,         # Populated from training targets
 
-    # EVT Improvements: Asymmetric Penalty + Adaptive Lambda
-    'evt_asymmetric_penalty': True,         # Penalize under-prediction more than over-prediction
-    'evt_under_penalty_multiplier': 2.0,    # Multiplier for under-prediction errors
-    'evt_use_lambda_schedule': True,        # Use adaptive lambda scheduling
+    # EVT Improvements: DISABLED (fixed λ=0.05 validation)
+    'evt_asymmetric_penalty': False,        # Disabled for baseline comparison
+    'evt_under_penalty_multiplier': 2.0,    # Not used when asymmetric_penalty=False
+    'evt_use_lambda_schedule': False,       # Disabled - using fixed λ=0.05
     'evt_lambda_schedule': {
         'initial': 0.05,     # Epochs 1-25: Learn general patterns (extended warmup)
         'mid': 0.12,         # Epochs 26-50: Gentle increase in extreme focus
@@ -68,6 +73,11 @@ CONFIG = {
     'use_wind_adjacency': True,    # Use dynamic wind-aware adjacency
     'wind_alpha': 0.6,             # Wind influence weight (0=distance-only, 1=wind-only)
     'distance_sigma': 100,         # Distance decay parameter
+    'wind_aggregation_mode': 'recent_weighted',  # 'recent_weighted' | 'last' | 'mean'
+    'wind_recency_beta': 3.0,      # Recency emphasis for recent_weighted aggregation
+    'wind_direction_method': 'circular',  # 'circular' | 'argmax_mean'
+    'wind_normalization': 'row',   # 'row' (directed) | 'symmetric'
+    'wind_calm_speed_threshold': 0.1,
     'wind_speed_idx': 10,          # Index of wind speed feature (wspm)
     'wind_dir_start_idx': 17,      # Start index of wind direction one-hot
     'wind_dir_end_idx': 33,        # End index of wind direction one-hot
@@ -85,7 +95,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'gcn_lstm_v3',     # v3: v2 + asymmetric penalty + adaptive lambda
+    'architecture_name': 'gcn_lstm_v2',     # v2: wind adjacency + direct decoding + evt_hybrid (λ=0.05)
     'hardware_tag': 'T4',       # Options: 'integrated_gpu', 'T4', 'rtx3090', etc.
     'use_versioned_checkpoint': True,       # If True, saves as <arch>_<hardware>_best.pt
 
@@ -247,6 +257,7 @@ def extract_wind_features(X_batch, config):
 def build_dynamic_adjacency(X_batch, config, device):
     """
     Build dynamic wind-aware adjacency matrix for a batch.
+    Uses GPU-optimized computation when possible.
 
     Args:
         X_batch: (batch, timesteps, num_nodes, features) tensor
@@ -256,6 +267,11 @@ def build_dynamic_adjacency(X_batch, config, device):
     Returns:
         adj_batch: (batch, num_nodes, num_nodes) tensor
     """
+    # Use GPU-optimized version if input is already on GPU
+    if X_batch.is_cuda:
+        return build_dynamic_adjacency_gpu(X_batch, config)
+
+    # Fallback to CPU version for non-GPU tensors
     wind_speeds, wind_directions = extract_wind_features(X_batch, config)
 
     # Build wind-aware adjacency
@@ -264,7 +280,12 @@ def build_dynamic_adjacency(X_batch, config, device):
         wind_directions=wind_directions,
         wind_categories=WIND_CATEGORIES,
         alpha=config['wind_alpha'],
-        distance_sigma=config['distance_sigma']
+        distance_sigma=config['distance_sigma'],
+        aggregation_mode=config.get('wind_aggregation_mode', 'recent_weighted'),
+        recency_beta=config.get('wind_recency_beta', 3.0),
+        direction_method=config.get('wind_direction_method', 'circular'),
+        normalization=config.get('wind_normalization', 'row'),
+        calm_speed_threshold=config.get('wind_calm_speed_threshold', 0.1)
     )
 
     # Convert to tensor
@@ -276,20 +297,110 @@ def build_dynamic_adjacency(X_batch, config, device):
 def split_data(X, Y, config):
     """Split data into train/val/test sets (chronological split)."""
     n_samples = len(X)
-    
+
     train_end = int(n_samples * config['train_ratio'])
     val_end = int(n_samples * (config['train_ratio'] + config['val_ratio']))
-    
+
     X_train, Y_train = X[:train_end], Y[:train_end]
     X_val, Y_val = X[train_end:val_end], Y[train_end:val_end]
     X_test, Y_test = X[val_end:], Y[val_end:]
-    
+
     print(f"\nData split:")
     print(f"  Train: {len(X_train)} samples")
     print(f"  Val:   {len(X_val)} samples")
     print(f"  Test:  {len(X_test)} samples")
-    
+
     return (X_train, Y_train), (X_val, Y_val), (X_test, Y_test)
+
+
+def fit_scalers_on_train(X_train, Y_train, config):
+    """
+    Fit scalers on training data only to prevent data leakage.
+
+    Args:
+        X_train: Training input data (samples, seq_len, nodes, features)
+        Y_train: Training target data (samples, horizon, nodes)
+        config: Configuration dict
+
+    Returns:
+        feature_scaler: Fitted scaler for input features (excluding wind one-hot)
+        target_scaler: Fitted scaler for PM2.5 targets
+        already_scaled: Boolean indicating if data appears pre-scaled
+    """
+    # Get dimensions
+    n_samples, seq_len, n_nodes, n_features = X_train.shape
+
+    # Find wind direction feature indices (these are one-hot, don't scale)
+    wind_start_idx = config.get('wind_dir_start_idx', 17)
+
+    # Check if data appears already scaled (values mostly in 0-1 range)
+    # PM2.5 (index 0) in original scale is typically 0-500+ µg/m³
+    pm25_max = X_train[:, :, :, 0].max()
+    pm25_min = X_train[:, :, :, 0].min()
+    y_max = Y_train.max()
+    y_min = Y_train.min()
+
+    # If PM2.5 values are in 0-1 range, data is likely pre-scaled
+    already_scaled = pm25_max <= 1.5 and pm25_min >= -0.5 and y_max <= 1.5 and y_min >= -0.5
+
+    if already_scaled:
+        print("  [WARNING] Data appears to be pre-scaled (values in 0-1 range).")
+        print("  Skipping additional scaling to avoid double-scaling.")
+        print("  For proper data leakage prevention, regenerate data:")
+        print("    1. python preproccess.py")
+        print("    2. cd utils && python window.py")
+        return None, None, True
+
+    # Flatten X for fitting: (samples * seq_len * nodes, features)
+    X_flat = X_train.reshape(-1, n_features)
+
+    # Fit feature scaler on non-wind features (indices 0 to wind_start_idx)
+    # This includes PM2.5 (idx 0), other pollutants, meteo, and temporal features
+    feature_scaler = MinMaxScaler()
+    feature_scaler.fit(X_flat[:, :wind_start_idx])
+
+    # Fit target scaler on Y values (PM2.5 only)
+    Y_flat = Y_train.reshape(-1, 1)
+    target_scaler = MinMaxScaler()
+    target_scaler.fit(Y_flat)
+
+    return feature_scaler, target_scaler, False
+
+
+def scale_data(X, Y, feature_scaler, target_scaler, config):
+    """
+    Scale input features and targets using pre-fitted scalers.
+
+    Args:
+        X: Input data (samples, seq_len, nodes, features)
+        Y: Target data (samples, horizon, nodes)
+        feature_scaler: Pre-fitted scaler for features
+        target_scaler: Pre-fitted scaler for targets
+        config: Configuration dict
+
+    Returns:
+        X_scaled, Y_scaled: Scaled arrays
+    """
+    n_samples, seq_len, n_nodes, n_features = X.shape
+    wind_start_idx = config.get('wind_dir_start_idx', 17)
+
+    # Scale features
+    X_flat = X.reshape(-1, n_features)
+    X_scaled_features = feature_scaler.transform(X_flat[:, :wind_start_idx])
+
+    # Reconstruct X with scaled features + unscaled wind one-hot
+    X_scaled_flat = np.concatenate([
+        X_scaled_features,
+        X_flat[:, wind_start_idx:]  # Wind one-hot stays unchanged
+    ], axis=1)
+    X_scaled = X_scaled_flat.reshape(n_samples, seq_len, n_nodes, n_features)
+
+    # Scale targets
+    Y_flat = Y.reshape(-1, 1)
+    Y_scaled_flat = target_scaler.transform(Y_flat)
+    Y_scaled = Y_scaled_flat.reshape(Y.shape)
+
+    return X_scaled.astype(np.float32), Y_scaled.astype(np.float32)
 
 
 def create_dataloaders(train_data, val_data, test_data, config):
@@ -422,16 +533,23 @@ def compute_metrics(model, test_loader, adj, config, target_scaler=None):
     """Compute evaluation metrics on test set."""
     model.eval()
     device = config['device']
-    
+    use_wind_adj = config.get('use_wind_adjacency', False)
+
     all_preds = []
     all_targets = []
-    
+
     with torch.no_grad():
         for X_batch, Y_batch in test_loader:
             X_batch = X_batch.to(device)
-            
-            predictions = model.predict(X_batch, adj, horizon=config['horizon'])
-            
+
+            # Build dynamic adjacency if enabled
+            if use_wind_adj:
+                adj_batch = build_dynamic_adjacency(X_batch, config, device)
+            else:
+                adj_batch = adj
+
+            predictions = model.predict(X_batch, adj_batch, horizon=config['horizon'])
+
             all_preds.append(predictions.cpu().numpy())
             all_targets.append(Y_batch.numpy())
     
@@ -450,10 +568,15 @@ def compute_metrics(model, test_loader, adj, config, target_scaler=None):
     rmse = np.sqrt(mse)
     mae = np.mean(np.abs(preds - targets))
     
-    # MAPE (avoid division by zero)
-    mask = targets > 0
-    mape = np.mean(np.abs((preds[mask] - targets[mask]) / targets[mask])) * 100
-    
+    # MAPE (use threshold to avoid division by small values)
+    # PM2.5 values below 5 µg/m³ are very low and can cause unstable MAPE
+    mape_threshold = 5.0
+    mask = targets > mape_threshold
+    if mask.any():
+        mape = np.mean(np.abs((preds[mask] - targets[mask]) / targets[mask])) * 100
+    else:
+        mape = float('nan')
+
     return {
         'MSE': mse,
         'RMSE': rmse,
@@ -471,34 +594,69 @@ def train(config):
     print("=" * 60)
     print("GCN-LSTM Training")
     print("=" * 60)
-    
+
     device = config['device']
     print(f"\nDevice: {device}")
-    
+
     # Load data
-    print("\n[1/5] Loading data...")
+    print("\n[1/6] Loading data...")
     X, Y, adj = load_data(config)
     adj = torch.FloatTensor(adj).to(device)
-    
+
     # Update config with actual dimensions
     config['input_dim'] = X.shape[-1]
     config['num_nodes'] = X.shape[2]
-    
-    # Split data
-    print("\n[2/5] Splitting data...")
+
+    # Split data BEFORE scaling to prevent data leakage
+    print("\n[2/6] Splitting data...")
     train_data, val_data, test_data = split_data(X, Y, config)
+    X_train, Y_train = train_data
+    X_val, Y_val = val_data
+    X_test, Y_test = test_data
 
-    # Derive EVT threshold from training targets only to avoid leakage
+    # Fit scalers on training data only (prevents data leakage)
+    print("\n[3/6] Fitting scalers on training data only...")
+    feature_scaler, target_scaler, already_scaled = fit_scalers_on_train(X_train, Y_train, config)
+
+    if already_scaled:
+        # Data is already scaled, use as-is
+        X_train_scaled, Y_train_scaled = X_train.astype(np.float32), Y_train.astype(np.float32)
+        X_val_scaled, Y_val_scaled = X_val.astype(np.float32), Y_val.astype(np.float32)
+        X_test_scaled, Y_test_scaled = X_test.astype(np.float32), Y_test.astype(np.float32)
+
+        # Try to load existing target scaler for metrics inverse transform
+        scaler_path = os.path.join(config['data_path'], 'target_scaler.save')
+        if os.path.exists(scaler_path):
+            target_scaler = joblib.load(scaler_path)
+            print(f"  Loaded existing target scaler from {scaler_path}")
+    else:
+        # Scale all splits using training-fitted scalers
+        X_train_scaled, Y_train_scaled = scale_data(X_train, Y_train, feature_scaler, target_scaler, config)
+        X_val_scaled, Y_val_scaled = scale_data(X_val, Y_val, feature_scaler, target_scaler, config)
+        X_test_scaled, Y_test_scaled = scale_data(X_test, Y_test, feature_scaler, target_scaler, config)
+
+        print(f"  Feature scaler range: {feature_scaler.data_min_[:3]}... to {feature_scaler.data_max_[:3]}...")
+        print(f"  Target scaler range: [{target_scaler.data_min_[0]:.2f}, {target_scaler.data_max_[0]:.2f}]")
+
+        # Save scalers for inference
+        os.makedirs(config['data_path'], exist_ok=True)
+        joblib.dump(target_scaler, os.path.join(config['data_path'], 'target_scaler.save'))
+        joblib.dump(feature_scaler, os.path.join(config['data_path'], 'feature_scaler.save'))
+
+    # Derive EVT threshold from SCALED training targets to match loss computation
     if config.get('evt_threshold') is None:
-        _, Y_train = train_data
-        config['evt_threshold'] = float(np.quantile(Y_train, config['evt_tail_quantile']))
+        config['evt_threshold'] = float(np.quantile(Y_train_scaled, config['evt_tail_quantile']))
 
+    # Create dataloaders with scaled data
     train_loader, val_loader, test_loader = create_dataloaders(
-        train_data, val_data, test_data, config
+        (X_train_scaled, Y_train_scaled),
+        (X_val_scaled, Y_val_scaled),
+        (X_test_scaled, Y_test_scaled),
+        config
     )
-    
+
     # Create model
-    print("\n[3/5] Creating model...")
+    print("\n[4/6] Creating model...")
     model = GCNLSTMModel(
         input_dim=config['input_dim'],
         hidden_dim=config['hidden_dim'],
@@ -510,7 +668,7 @@ def train(config):
         horizon=config['horizon'],
         use_direct_decoding=config.get('use_direct_decoding', False)
     ).to(device)
-    
+
     print(f"  Model parameters: {model.get_num_params():,}")
     
     # Loss and optimizer
@@ -563,7 +721,7 @@ def train(config):
     )
     
     # Training loop
-    print("\n[4/5] Training...")
+    print("\n[5/6] Training...")
     print("-" * 60)
     
     best_val_loss = float('inf')
@@ -682,18 +840,13 @@ def train(config):
                 break
     
     # Load best model for evaluation
-    print("\n[5/5] Evaluating best model...")
+    print("\n[6/6] Evaluating best model...")
     print("-" * 60)
 
     checkpoint = torch.load(checkpoint_path, weights_only=False)
     model.load_state_dict(checkpoint['model_state_dict'])
-    
-    # Load target scaler for inverse transform
-    target_scaler = None
-    scaler_path = os.path.join(config['data_path'], 'target_scaler.save')
-    if os.path.exists(scaler_path):
-        target_scaler = joblib.load(scaler_path)
-    
+
+    # Target scaler was already saved earlier and is in scope
     # Compute metrics
     metrics = compute_metrics(model, test_loader, adj, config, target_scaler)
     

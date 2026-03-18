@@ -88,14 +88,21 @@ class GraphLSTMDecoder(nn.Module):
         """
         batch_size = encoder_outputs.size(0)
         device = encoder_outputs.device
-        
+
         # Initialize first decoder input with zeros (or last encoder hidden state)
         # Using last hidden state of top encoder layer
         decoder_input = hidden_states[-1][0]  # (batch, num_nodes, hidden_dim)
-        
+
+        # Determine teacher forcing per sample (consistent across all timesteps for each sample)
+        # This provides more stable training than per-timestep randomness
+        if target is not None and teacher_forcing_ratio > 0:
+            use_tf_mask = torch.rand(batch_size, device=device) < teacher_forcing_ratio  # (batch,)
+        else:
+            use_tf_mask = torch.zeros(batch_size, dtype=torch.bool, device=device)
+
         predictions = []
         attention_weights_all = []
-        
+
         for t in range(horizon):
             # Multi-head attention over encoder outputs
             # Query: current decoder hidden state
@@ -106,56 +113,63 @@ class GraphLSTMDecoder(nn.Module):
                 value=encoder_outputs
             )
             attention_weights_all.append(attn_weights)
-            
+
             # Combine decoder input with attention context
             combined = torch.cat([decoder_input, context], dim=-1)  # (batch, num_nodes, hidden_dim*2)
             combined = self.context_proj(combined)  # (batch, num_nodes, hidden_dim)
             combined = self.dropout(combined)
-            
-            # Pass through Graph LSTM layers
+
+            # Pass through Graph LSTM layers with Pre-LN pattern
             layer_input = combined
             for i, (layer, norm) in enumerate(zip(self.layers, self.layer_norms)):
                 h, c = hidden_states[i]
-                
+
+                # Pre-LN: normalize BEFORE the layer
+                layer_input_norm = norm(layer_input)
+
                 # Graph LSTM cell forward
-                h_new, c_new = layer(layer_input, (h, c), adj)
-                
-                # Residual connection
+                h_new, c_new = layer(layer_input_norm, (h, c), adj)
+
+                # Residual connection (skip first layer)
                 if i > 0:
                     h_new = h_new + layer_input
-                
-                # Layer normalization
-                h_new = norm(h_new)
-                
-                # Dropout
+
+                # Dropout after residual
                 h_new = self.dropout(h_new)
-                
+
                 # Update hidden state
                 hidden_states[i] = (h_new, c_new)
-                
+
                 # Output of this layer is input to next layer
                 layer_input = h_new
-            
+
             # Project to output dimension
             output = self.output_proj(layer_input)  # (batch, num_nodes, output_dim)
             predictions.append(output)
-            
-            # Prepare next decoder input
-            if target is not None and torch.rand(1).item() < teacher_forcing_ratio:
-                # Teacher forcing: use ground truth
-                # target: (batch, horizon, num_nodes) -> need to project to hidden_dim
-                next_input = target[:, t, :].unsqueeze(-1)  # (batch, num_nodes, 1)
-                decoder_input = self.input_proj(next_input)  # (batch, num_nodes, hidden_dim)
+
+            # Prepare next decoder input with per-sample teacher forcing
+            if target is not None and t < horizon - 1:
+                # Teacher forcing input: use ground truth
+                tf_input = target[:, t, :].unsqueeze(-1)  # (batch, num_nodes, 1)
+                tf_input = self.input_proj(tf_input)  # (batch, num_nodes, hidden_dim)
+
+                # Autoregressive input: use own prediction
+                ar_input = self.input_proj(output)  # (batch, num_nodes, hidden_dim)
+
+                # Select based on per-sample mask
+                # use_tf_mask: (batch,) -> (batch, 1, 1) for broadcasting
+                mask = use_tf_mask.view(-1, 1, 1)
+                decoder_input = torch.where(mask, tf_input, ar_input)
             else:
-                # Autoregressive: use own prediction
-                decoder_input = self.input_proj(output)  # (batch, num_nodes, hidden_dim)
-        
+                # Pure autoregressive: use own prediction
+                decoder_input = self.input_proj(output)
+
         # Stack predictions: (batch, horizon, num_nodes, output_dim)
         predictions = torch.stack(predictions, dim=1)
-        
+
         # Stack attention weights: (batch, horizon, num_heads, num_nodes, enc_seq_len)
         attention_weights_all = torch.stack(attention_weights_all, dim=1)
-        
+
         return predictions, attention_weights_all
     
     def inference(self, encoder_outputs, hidden_states, adj, horizon=6):
@@ -196,18 +210,20 @@ class DirectMultiHorizonDecoder(nn.Module):
         horizon,
         num_layers=2,
         num_heads=4,
-        dropout=0.1
+        dropout=0.1,
+        max_horizon=24  # Maximum supported horizon for flexibility
     ):
         super().__init__()
         self.output_dim = output_dim
         self.hidden_dim = hidden_dim
         self.num_nodes = num_nodes
         self.horizon = horizon
+        self.max_horizon = max(horizon, max_horizon)
         self.num_layers = num_layers
 
-        # Learnable step query embeddings: one per forecast horizon step
-        # Each embedding gives the decoder a distinct "intent" for that future step
-        self.step_queries = nn.Parameter(torch.empty(horizon, hidden_dim))
+        # Learnable step query embeddings: support up to max_horizon steps
+        # This allows flexible horizon at inference time
+        self.step_queries = nn.Parameter(torch.empty(self.max_horizon, hidden_dim))
         nn.init.xavier_uniform_(self.step_queries)
 
         # Multi-head attention over encoder outputs (shared across horizon steps)
@@ -254,7 +270,7 @@ class DirectMultiHorizonDecoder(nn.Module):
             hidden_states:   list of (h, c) tuples per encoder layer
             adj:             adjacency matrix — static (N,N) or dynamic (B,N,N)
             target:          unused; kept for API compatibility with autoregressive decoder
-            horizon:         overrides self.horizon if given
+            horizon:         overrides self.horizon if given (must be <= max_horizon)
             teacher_forcing_ratio: ignored
         Returns:
             predictions:      (batch, horizon, num_nodes, output_dim)
@@ -262,6 +278,13 @@ class DirectMultiHorizonDecoder(nn.Module):
         """
         if horizon is None:
             horizon = self.horizon
+
+        # Validate horizon is within supported range
+        if horizon > self.max_horizon:
+            raise ValueError(
+                f"Requested horizon {horizon} exceeds max_horizon {self.max_horizon}. "
+                f"Reinitialize decoder with larger max_horizon."
+            )
 
         batch_size = encoder_outputs.size(0)
 
@@ -293,20 +316,30 @@ class DirectMultiHorizonDecoder(nn.Module):
             combined = self.context_proj(combined)           # (batch, num_nodes, hidden_dim)
             combined = self.dropout(combined)
 
-            # Process through Graph-LSTM layers.
+            # Process through Graph-LSTM layers with Pre-LN pattern.
             # Each horizon step starts from the same encoder hidden states —
             # there is no recurrent dependency between forecast steps.
+            # BUT within each step, layers must build on each other's states.
             layer_input = combined
+            step_hidden_states = [(h.clone(), c.clone()) for h, c in hidden_states]  # Copy for this step
+
             for i, (layer, norm) in enumerate(zip(self.layers, self.layer_norms)):
-                h, c = hidden_states[i]
-                h_new, c_new = layer(layer_input, (h, c), adj)
+                h, c = step_hidden_states[i]
+
+                # Pre-LN: normalize BEFORE the layer
+                layer_input_norm = norm(layer_input)
+
+                h_new, c_new = layer(layer_input_norm, (h, c), adj)
 
                 # Residual connection (upper layers only)
                 if i > 0:
                     h_new = h_new + layer_input
 
-                h_new = norm(h_new)
                 h_new = self.dropout(h_new)
+
+                # Update hidden state so next layer builds on this layer's output
+                step_hidden_states[i] = (h_new, c_new)
+
                 layer_input = h_new
 
             output = self.output_proj(layer_input)  # (batch, num_nodes, output_dim)
