@@ -72,7 +72,7 @@ CONFIG = {
     # Wind-aware adjacency
     'use_wind_adjacency': True,    # Use dynamic wind-aware adjacency
     'wind_alpha': 0.6,             # Wind influence weight (0=distance-only, 1=wind-only)
-    'distance_sigma': 100,         # Distance decay parameter
+    'distance_sigma': 1800,        # Distance decay parameter (calibrated for Beijing ~35km mean)
     'wind_aggregation_mode': 'recent_weighted',  # 'recent_weighted' | 'last' | 'mean'
     'wind_recency_beta': 3.0,      # Recency emphasis for recent_weighted aggregation
     'wind_direction_method': 'circular',  # 'circular' | 'argmax_mean'

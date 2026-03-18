@@ -152,7 +152,7 @@ def build_dynamic_adjacency(X_batch, config, device):
         wind_directions=wind_directions,
         wind_categories=WIND_CATEGORIES,
         alpha=config.get('wind_alpha', 0.6),
-        distance_sigma=config.get('distance_sigma', 100),
+        distance_sigma=config.get('distance_sigma', 1800),
         aggregation_mode=config.get('wind_aggregation_mode', 'recent_weighted'),
         recency_beta=config.get('wind_recency_beta', 3.0),
         direction_method=config.get('wind_direction_method', 'circular'),

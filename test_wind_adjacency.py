@@ -36,7 +36,7 @@ try:
         wind_directions=wind_directions,
         wind_categories=WIND_CATEGORIES,
         alpha=0.6,
-        distance_sigma=100
+        distance_sigma=1800
     )
     print(f"  [OK] Adjacency batch shape: {adj_batch.shape}")
     print(f"  [OK] Expected shape: ({batch_size}, {num_nodes}, {num_nodes})")
@@ -64,7 +64,7 @@ try:
         wind_directions=wind_directions_torch,
         wind_categories=WIND_CATEGORIES,
         alpha=0.6,
-        distance_sigma=100
+        distance_sigma=1800
     )
     print(f"  [OK] Adjacency batch shape (from torch): {adj_batch_torch.shape}")
 
@@ -75,7 +75,7 @@ try:
         wind_directions=wind_directions,
         wind_categories=WIND_CATEGORIES,
         alpha=0.0,
-        distance_sigma=100
+        distance_sigma=1800
     )
 
     # Alpha = 1 (pure wind-based)
@@ -84,7 +84,7 @@ try:
         wind_directions=wind_directions,
         wind_categories=WIND_CATEGORIES,
         alpha=1.0,
-        distance_sigma=100
+        distance_sigma=1800
     )
 
     print(f"  Distance-based (alpha=0.0):")

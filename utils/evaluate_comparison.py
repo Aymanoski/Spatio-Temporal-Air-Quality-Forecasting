@@ -31,9 +31,9 @@ def compute_mae(pred, target):
     return np.mean(np.abs(pred - target))
 
 
-def compute_mape(pred, target, epsilon=1e-8):
-    """Mean Absolute Percentage Error."""
-    mask = np.abs(target) > epsilon
+def compute_mape(pred, target, threshold=5.0):
+    """Mean Absolute Percentage Error (with threshold for small values)."""
+    mask = target > threshold  # Avoid division by small values
     if np.sum(mask) == 0:
         return 0.0
     return np.mean(np.abs((pred[mask] - target[mask]) / target[mask])) * 100
@@ -139,7 +139,7 @@ def build_dynamic_adjacency(X_batch, config, device):
         wind_directions=wind_directions,
         wind_categories=WIND_CATEGORIES,
         alpha=config.get('wind_alpha', 0.6),
-        distance_sigma=config.get('distance_sigma', 100),
+        distance_sigma=config.get('distance_sigma', 1800),
         aggregation_mode=config.get('wind_aggregation_mode', 'recent_weighted'),
         recency_beta=config.get('wind_recency_beta', 3.0),
         direction_method=config.get('wind_direction_method', 'circular'),
@@ -403,13 +403,26 @@ def compare_models(*checkpoint_paths, data_path="data/processed/"):
     print("=" * 80)
 
     models_info = {}
+    used_names = set()
 
     # Load all models
     for i, ckpt_path in enumerate(checkpoint_paths):
         model, config, checkpoint = load_model_from_checkpoint(ckpt_path)
         arch_name = checkpoint.get('architecture', {}).get('name', f'model_{i+1}')
 
-        models_info[arch_name] = {
+        # Handle duplicate names by appending index
+        original_name = arch_name
+        counter = 1
+        while arch_name in used_names:
+            arch_name = f"{original_name}_{counter}"
+            counter += 1
+        used_names.add(arch_name)
+
+        # Use filename as fallback identifier
+        filename = Path(ckpt_path).stem
+        display_name = f"{arch_name} ({filename})" if arch_name != filename else arch_name
+
+        models_info[display_name] = {
             'model': model,
             'config': config,
             'checkpoint': checkpoint,
