@@ -240,10 +240,17 @@ python train.py
 python optuna_tune.py --trials 30 --epochs 35 --patience 8
 ```
 
+Tune wind-graph physics parameters too (bigger search space):
+
+```bash
+python optuna_tune.py --trials 50 --epochs 35 --patience 8 --tune-wind-physics
+```
+
 Notes:
 - Tuning optimizes validation loss and disables test evaluation during trials (to avoid test leakage).
 - Results are stored in `optuna_study.db` by default.
 - You can resume the same study by reusing `--study-name` and `--storage`.
+- Wind-physics tuning is recommended after a baseline Optuna run, because it increases trial count needed for stable results.
 
 5. Evaluate best checkpoint:
 
