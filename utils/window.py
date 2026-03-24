@@ -3,7 +3,7 @@ import numpy as np
 def create_windows(data, input_len=24, horizon=6):
     X, Y = [], []
 
-    for i in range(len(data) - input_len - horizon):
+    for i in range(len(data) - input_len - horizon + 1):
         X.append(data[i:i+input_len])
         Y.append(data[i+input_len:i+input_len+horizon, :, 0])  # PM2.5 only
 

@@ -11,6 +11,7 @@ from torch.utils.data import DataLoader, TensorDataset
 import numpy as np
 import os
 import time
+import random
 import joblib
 from sklearn.preprocessing import MinMaxScaler
 from models import GCNLSTMModel
@@ -100,7 +101,16 @@ CONFIG = {
     'use_versioned_checkpoint': True,       # If True, saves as <arch>_<hardware>_best.pt
 
     # Resume training
-    'resume': False         # Set to True to resume from checkpoint
+    'resume': False,        # Set to True to resume from checkpoint
+
+    # Reproducibility
+    'seed': 42,
+    'deterministic': False,
+
+    # Runtime controls (useful for hyperparameter tuning)
+    'save_checkpoints': True,
+    'evaluate_test': True,
+    'save_history': True
 }
 
 
@@ -207,6 +217,21 @@ def get_evt_lambda_for_epoch(epoch, schedule_config, total_epochs):
             return mid + (final - mid) * progress
         else:  # step
             return final
+
+
+def set_global_seed(seed, deterministic=False):
+    """Set random seeds for reproducible training runs."""
+    seed = int(seed)
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+    # Optional deterministic mode (slower, but more reproducible)
+    if deterministic:
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
 
 # ============================================================================
@@ -589,11 +614,15 @@ def compute_metrics(model, test_loader, adj, config, target_scaler=None):
 # Main Training Loop
 # ============================================================================
 
-def train(config):
+def train(config, trial=None):
     """Main training function."""
     print("=" * 60)
     print("GCN-LSTM Training")
     print("=" * 60)
+
+    if config.get('seed') is not None:
+        set_global_seed(config['seed'], deterministic=config.get('deterministic', False))
+        print(f"Seed: {config['seed']} (deterministic={config.get('deterministic', False)})")
 
     device = config['device']
     print(f"\nDevice: {device}")
@@ -729,8 +758,14 @@ def train(config):
     history = {'train_loss': [], 'val_loss': []}
     start_epoch = 0
     
-    # Create checkpoint directory
-    os.makedirs(config['model_save_path'], exist_ok=True)
+    save_checkpoints = config.get('save_checkpoints', True)
+    evaluate_test = config.get('evaluate_test', True)
+    save_history = config.get('save_history', True)
+    best_state_dict = None
+
+    # Create checkpoint directory if needed
+    if save_checkpoints:
+        os.makedirs(config['model_save_path'], exist_ok=True)
 
     # Determine checkpoint filename
     if config.get('use_versioned_checkpoint', False):
@@ -741,10 +776,13 @@ def train(config):
         checkpoint_filename = config['best_model_name']
 
     checkpoint_path = os.path.join(config['model_save_path'], checkpoint_filename)
-    print(f"\nCheckpoint path: {checkpoint_path}")
+    if save_checkpoints:
+        print(f"\nCheckpoint path: {checkpoint_path}")
+    else:
+        print(f"\nCheckpoint path: {checkpoint_path} (disabled during this run)")
 
     # Resume from checkpoint if specified
-    if config.get('resume', False) and os.path.exists(checkpoint_path):
+    if save_checkpoints and config.get('resume', False) and os.path.exists(checkpoint_path):
         print(f"\nResuming from checkpoint: {checkpoint_path}")
         checkpoint = torch.load(checkpoint_path, weights_only=False)
         model.load_state_dict(checkpoint['model_state_dict'])
@@ -809,60 +847,83 @@ def train(config):
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             patience_counter = 0
-            
-            # Save best model with metadata
-            torch.save({
-                'epoch': epoch,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'val_loss': val_loss,
-                'train_loss': train_loss,
-                'config': config,
-                'hardware': {
-                    'device': str(device),
-                    'tag': config.get('hardware_tag', 'unknown'),
-                    'cuda_available': torch.cuda.is_available(),
-                    'cuda_device_name': torch.cuda.get_device_name(0) if torch.cuda.is_available() else None
-                },
-                'architecture': {
-                    'name': config.get('architecture_name', 'unknown'),
-                    'num_params': model.get_num_params(),
-                    'use_direct_decoding': config.get('use_direct_decoding', False),
-                    'use_wind_adjacency': config.get('use_wind_adjacency', False)
-                },
-                'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
-            }, checkpoint_path)
-            print(f"  -> Saved best model (val_loss: {val_loss:.6f})")
+
+            # Keep best weights in memory (needed when checkpoint saving is disabled)
+            best_state_dict = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+
+            if save_checkpoints:
+                # Save best model with metadata
+                torch.save({
+                    'epoch': epoch,
+                    'model_state_dict': model.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'val_loss': val_loss,
+                    'train_loss': train_loss,
+                    'config': config,
+                    'hardware': {
+                        'device': str(device),
+                        'tag': config.get('hardware_tag', 'unknown'),
+                        'cuda_available': torch.cuda.is_available(),
+                        'cuda_device_name': torch.cuda.get_device_name(0) if torch.cuda.is_available() else None
+                    },
+                    'architecture': {
+                        'name': config.get('architecture_name', 'unknown'),
+                        'num_params': model.get_num_params(),
+                        'use_direct_decoding': config.get('use_direct_decoding', False),
+                        'use_wind_adjacency': config.get('use_wind_adjacency', False)
+                    },
+                    'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+                }, checkpoint_path)
+                print(f"  -> Saved best model (val_loss: {val_loss:.6f})")
+            else:
+                print(f"  -> New best model in memory (val_loss: {val_loss:.6f})")
         else:
             patience_counter += 1
             if patience_counter >= config['patience']:
                 print(f"\nEarly stopping at epoch {epoch+1}")
                 break
-    
-    # Load best model for evaluation
-    print("\n[6/6] Evaluating best model...")
-    print("-" * 60)
 
-    checkpoint = torch.load(checkpoint_path, weights_only=False)
-    model.load_state_dict(checkpoint['model_state_dict'])
+        # Report intermediate value for Optuna and prune bad trials early
+        if trial is not None:
+            trial.report(val_loss, step=epoch)
+            if trial.should_prune():
+                raise RuntimeError("TRIAL_PRUNED")
+    
+    # Restore best model weights
+    if save_checkpoints and os.path.exists(checkpoint_path):
+        checkpoint = torch.load(checkpoint_path, weights_only=False)
+        model.load_state_dict(checkpoint['model_state_dict'])
+    elif best_state_dict is not None:
+        model.load_state_dict(best_state_dict)
 
-    # Target scaler was already saved earlier and is in scope
-    # Compute metrics
-    metrics = compute_metrics(model, test_loader, adj, config, target_scaler)
-    
-    print("\nTest Set Metrics:")
-    for name, value in metrics.items():
-        print(f"  {name}: {value:.4f}")
-    
+    metrics = {'best_val_loss': best_val_loss}
+    if evaluate_test:
+        print("\n[6/6] Evaluating best model...")
+        print("-" * 60)
+
+        # Target scaler was already saved earlier and is in scope
+        test_metrics = compute_metrics(model, test_loader, adj, config, target_scaler)
+        metrics.update(test_metrics)
+
+        print("\nTest Set Metrics:")
+        for name, value in test_metrics.items():
+            print(f"  {name}: {value:.4f}")
+    else:
+        print("\n[6/6] Skipping test evaluation (evaluate_test=False)")
+
     # Save training history
-    np.save(
-        os.path.join(config['model_save_path'], 'history.npy'),
-        history
-    )
+    if save_history:
+        np.save(
+            os.path.join(config['model_save_path'], 'history.npy'),
+            history
+        )
     
     print("\n" + "=" * 60)
     print("Training complete!")
-    print(f"Best model saved to: {checkpoint_path}")
+    if save_checkpoints:
+        print(f"Best model saved to: {checkpoint_path}")
+    else:
+        print("Best model checkpoint saving was disabled for this run.")
     print(f"Architecture: {config.get('architecture_name', 'N/A')}")
     print(f"Hardware: {config.get('hardware_tag', 'N/A')}")
     print("=" * 60)

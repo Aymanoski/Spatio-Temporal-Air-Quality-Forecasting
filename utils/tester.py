@@ -13,7 +13,7 @@ import joblib
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models import GCNLSTMModel
-from graph import build_wind_aware_adjacency_batch, WIND_CATEGORIES
+from utils.graph import build_wind_aware_adjacency_batch, WIND_CATEGORIES
 
 
 # ============================================================================

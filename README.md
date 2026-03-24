@@ -234,6 +234,17 @@ python window.py
 python train.py
 ```
 
+4.1 Hyperparameter tuning with Optuna:
+
+```bash
+python optuna_tune.py --trials 30 --epochs 35 --patience 8
+```
+
+Notes:
+- Tuning optimizes validation loss and disables test evaluation during trials (to avoid test leakage).
+- Results are stored in `optuna_study.db` by default.
+- You can resume the same study by reusing `--study-name` and `--storage`.
+
 5. Evaluate best checkpoint:
 
 ```bash
