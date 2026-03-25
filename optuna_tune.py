@@ -37,9 +37,9 @@ def build_trial_config(trial, args):
     # Core optimization hyperparameters
     config["learning_rate"] = trial.suggest_float("learning_rate", 8e-5, 3e-3, log=True)
     config["weight_decay"] = trial.suggest_float("weight_decay", 1e-7, 5e-4, log=True)
-    config["batch_size"] = trial.suggest_categorical("batch_size", [16, 32, 64])
-    config["hidden_dim"] = trial.suggest_categorical("hidden_dim", [64, 96, 128])
-    config["num_layers"] = trial.suggest_int("num_layers", 1, 3)
+    config["batch_size"] = trial.suggest_categorical("batch_size", [32, 64])
+    config["hidden_dim"] = trial.suggest_categorical("hidden_dim", [64, 96])
+    config["num_layers"] = trial.suggest_int("num_layers", 1, 2)
     config["dropout"] = trial.suggest_float("dropout", 0.0, 0.3)
 
     # Optional: teacher forcing schedule for sequence stability
