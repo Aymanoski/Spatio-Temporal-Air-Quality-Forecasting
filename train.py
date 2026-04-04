@@ -33,52 +33,53 @@ CONFIG = {
     
     # Model architecture
     'input_dim': 33,        # Number of input features per node
-    'hidden_dim': 64,       # Hidden dimension
+    'hidden_dim': 96,       # Hidden dimension
     'output_dim': 1,        # Output dimension (PM2.5 only)
     'num_nodes': 12,        # Number of monitoring stations
     'num_layers': 2,        # Number of Graph LSTM layers
     'num_heads': 4,         # Attention heads
-    'dropout': 0.1,
+    'dropout': 0.11186847151885773,
     'use_direct_decoding': True,  # Direct multi-horizon decoding (no autoregression)
     
     # Training
-    'batch_size': 32,
-    'learning_rate': 1e-3,
-    'weight_decay': 1e-5,
-    'epochs': 100,
-    'patience': 15,          # Early stopping patience (back to original)
+    'batch_size': 64,
+    'learning_rate': 0.002268477401091623,
+    'weight_decay': 3.6109376924144426e-06,
+    'epochs': 45,
+    'patience': 10,          # Early stopping patience per Optuna trial
     'teacher_forcing_start': 1.0,  # Initial teacher forcing ratio
-    'teacher_forcing_end': 0.0,    # Final teacher forcing ratio
+    'teacher_forcing_end': 0.1186213143605598,    # Final teacher forcing ratio
 
     # Loss
     'loss_type': 'evt_hybrid',     # Options: 'mse' or 'evt_hybrid'
-    'evt_lambda': 0.05,            # Base weight of EVT tail component (used if no schedule)
-    'evt_tail_quantile': 0.90,     # Threshold quantile for extremes
-    'evt_xi': 0.10,                # GPD shape parameter
+    'evt_lambda': 0.010239919882925063,            # Base weight of EVT tail component (used if no schedule)
+    'evt_tail_quantile': 0.8899473849913618,     # Threshold quantile for extremes
+    'evt_xi': 0.1452748687701981,                # GPD shape parameter
     'evt_threshold': None,         # Populated from training targets
+    'evt_threshold_mode': 'global',  # 'global' or 'per_node'
 
     # EVT Improvements: DISABLED (fixed λ=0.05 validation)
-    'evt_asymmetric_penalty': False,        # Disabled for baseline comparison
-    'evt_under_penalty_multiplier': 2.0,    # Not used when asymmetric_penalty=False
-    'evt_use_lambda_schedule': False,       # Disabled - using fixed λ=0.05
+    'evt_asymmetric_penalty': False,        # Trial 20: OFF
+    'evt_under_penalty_multiplier': 1.5010588425059723,    # Not used when asymmetric_penalty=False
+    'evt_use_lambda_schedule': True,       # Trial 20: ON
     'evt_lambda_schedule': {
-        'initial': 0.05,     # Epochs 1-25: Learn general patterns (extended warmup)
-        'mid': 0.12,         # Epochs 26-50: Gentle increase in extreme focus
-        'final': 0.25,       # Epochs 51+: Moderate extreme emphasis (less aggressive)
-        'warmup_epochs': 25, # Extended warmup period
-        'mid_epochs': 50,    # Slower transition to final
+        'initial': 0.010988552921615895,     # Epochs 1..warmup
+        'mid': 0.03602416581231669,          # Gentle increase in extreme focus
+        'final': 0.10069100109718829,        # Moderate extreme emphasis
+        'warmup_epochs': 15,
+        'mid_epochs': 38,
         'transition': 'smooth'  # 'smooth' for gradual, 'step' for abrupt changes
     },
 
     # Wind-aware adjacency
     'use_wind_adjacency': True,    # Use dynamic wind-aware adjacency
-    'wind_alpha': 0.6,             # Wind influence weight (0=distance-only, 1=wind-only)
-    'distance_sigma': 1800,        # Distance decay parameter (calibrated for Beijing ~35km mean)
-    'wind_aggregation_mode': 'recent_weighted',  # 'recent_weighted' | 'last' | 'mean'
-    'wind_recency_beta': 3.0,      # Recency emphasis for recent_weighted aggregation
+    'wind_alpha': 0.5864436936498303,             # Wind influence weight (0=distance-only, 1=wind-only)
+    'distance_sigma': 1423.5664566641155,        # Distance decay parameter
+    'wind_aggregation_mode': 'mean',  # 'recent_weighted' | 'last' | 'mean'
+    'wind_recency_beta': 2.760763219649104,      # Recency emphasis for recent_weighted aggregation
     'wind_direction_method': 'circular',  # 'circular' | 'argmax_mean'
     'wind_normalization': 'row',   # 'row' (directed) | 'symmetric'
-    'wind_calm_speed_threshold': 0.1,
+    'wind_calm_speed_threshold': 0.4563047452683345,
     'wind_speed_idx': 10,          # Index of wind speed feature (wspm)
     'wind_dir_start_idx': 17,      # Start index of wind direction one-hot
     'wind_dir_end_idx': 33,        # End index of wind direction one-hot
@@ -96,7 +97,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'gcn_lstm_v2',     # v2: wind adjacency + direct decoding + evt_hybrid (λ=0.05)
+    'architecture_name': 'optuna_best_trial20',     # Loaded hyperparameters from Optuna trial 20
     'hardware_tag': 'T4',       # Options: 'integrated_gpu', 'T4', 'rtx3090', etc.
     'use_versioned_checkpoint': True,       # If True, saves as <arch>_<hardware>_best.pt
 
@@ -129,7 +130,9 @@ class EVTHybridLoss(nn.Module):
     def __init__(self, threshold, lambda_tail=0.05, xi=0.10, eps=1e-6,
                  asymmetric_penalty=False, under_penalty_multiplier=2.0):
         super().__init__()
-        self.threshold = float(threshold)
+        # threshold can be a float (global) or a 1D array-like (per node).
+        thr = torch.as_tensor(threshold, dtype=torch.float32)
+        self.register_buffer("threshold", thr)
         self.lambda_tail = float(lambda_tail)
         self.xi = float(xi)
         self.eps = float(eps)
@@ -145,32 +148,44 @@ class EVTHybridLoss(nn.Module):
         mse = F.mse_loss(predictions, targets)
 
         # Identify extreme values (above threshold)
-        threshold = targets.new_tensor(self.threshold)
-        mask = targets > threshold
+        thr = self.threshold.to(device=targets.device, dtype=targets.dtype)
+        if thr.ndim == 0:
+            thr_view = thr
+        elif thr.ndim == 1:
+            # Per-node thresholds; predictions/targets are (batch, horizon, nodes)
+            thr_view = thr.view(1, 1, -1)
+        else:
+            raise ValueError(f"Unsupported threshold shape: {tuple(thr.shape)}")
+
+        mask = targets > thr_view
 
         if mask.any():
             # Get predictions and targets for extreme values
             extreme_preds = predictions[mask]
             extreme_targets = targets[mask]
 
-            # Compute excesses over threshold
-            target_excess = extreme_targets - threshold
-            pred_excess = torch.clamp(extreme_preds - threshold, min=0.0)  # Ensure non-negative
+            # Select matching thresholds for masked elements (handles global or per-node thresholds)
+            thr_selected = thr_view.expand_as(targets)[mask]
+            target_excess = extreme_targets - thr_selected
 
-            # Weighted MSE on excesses
-            # For extreme values, errors are weighted more heavily
-            # Weight increases with the magnitude of the excess
-            excess_weight = 1.0 + self.xi * target_excess / (target_excess.mean() + self.eps)
+            # Weighted squared error directly on predictions (keeps gradient for under-prediction)
+            err = extreme_preds - extreme_targets
+
+            # Weight increases with magnitude of excess (stabilize denominator)
+            mean_excess = target_excess.mean().detach()
+            excess_weight = 1.0 + self.xi * target_excess / (mean_excess + self.eps)
+            excess_weight = torch.clamp(excess_weight, min=1.0)
 
             # Asymmetric penalty: penalize under-prediction more
             if self.asymmetric_penalty:
-                # Under-prediction: predicted excess < target excess
-                under_mask = pred_excess < target_excess
-                excess_weight = excess_weight.clone()  # Avoid in-place modification
-                excess_weight[under_mask] *= self.under_penalty_multiplier
+                under_mask = err < 0
+                excess_weight = excess_weight * torch.where(
+                    under_mask,
+                    err.new_tensor(self.under_penalty_multiplier),
+                    err.new_tensor(1.0)
+                )
 
-            weighted_excess_error = excess_weight * (pred_excess - target_excess) ** 2
-            tail_loss = weighted_excess_error.mean()
+            tail_loss = (excess_weight * (err ** 2)).mean()
         else:
             tail_loss = torch.zeros(1, device=predictions.device, dtype=predictions.dtype)
 
@@ -674,7 +689,15 @@ def train(config, trial=None):
 
     # Derive EVT threshold from SCALED training targets to match loss computation
     if config.get('evt_threshold') is None:
-        config['evt_threshold'] = float(np.quantile(Y_train_scaled, config['evt_tail_quantile']))
+        q = config['evt_tail_quantile']
+        mode = config.get('evt_threshold_mode', 'global')
+        if mode == 'global':
+            config['evt_threshold'] = float(np.quantile(Y_train_scaled, q))
+        elif mode == 'per_node':
+            # Y_train_scaled: (samples, horizon, nodes) -> per-node threshold over (samples, horizon)
+            config['evt_threshold'] = np.quantile(Y_train_scaled, q, axis=(0, 1)).astype(np.float32)
+        else:
+            raise ValueError(f"Unknown evt_threshold_mode: {mode}")
 
     # Create dataloaders with scaled data
     train_loader, val_loader, test_loader = create_dataloaders(
@@ -717,10 +740,16 @@ def train(config, trial=None):
         )
 
         # Print configuration
+        thr = config['evt_threshold']
+        if isinstance(thr, (list, tuple, np.ndarray)):
+            thr_mean = float(np.mean(thr))
+            thr_str = f"per_node(mean={thr_mean:.4f})"
+        else:
+            thr_str = f"{float(thr):.4f}"
         print(
             f"  Loss: EVT Hybrid (lambda={initial_lambda}, "
             f"q={config['evt_tail_quantile']}, xi={config['evt_xi']}, "
-            f"threshold={config['evt_threshold']:.4f})"
+            f"threshold={thr_str})"
         )
 
         if config.get('evt_asymmetric_penalty', False):
