@@ -535,10 +535,21 @@ def train_epoch(model, train_loader, optimizer, criterion, adj, config, teacher_
     return total_loss / len(train_loader)
 
 
-def validate(model, val_loader, criterion, adj, config):
-    """Validate model."""
+def validate(model, val_loader, criterion, adj, config, target_scaler=None):
+    """
+    Validate model.
+
+    Returns:
+        val_loss: Mean EVT/MSE loss on normalized predictions (used for LR scheduler).
+        val_mae:  Mean absolute error on original scale if target_scaler is provided,
+                  otherwise on normalized scale. Used for early stopping and checkpoint
+                  selection — decoupled from the loss function so EVT lambda changes
+                  do not artificially trigger early stopping.
+    """
     model.eval()
     total_loss = 0
+    all_preds = []
+    all_targets = []
     device = config['device']
     use_wind_adj = config.get('use_wind_adjacency', False)
 
@@ -561,12 +572,27 @@ def validate(model, val_loader, criterion, adj, config):
                 horizon=config['horizon'],
                 teacher_forcing_ratio=0.0
             )
-            
+
             predictions = predictions.squeeze(-1)
             loss = criterion(predictions, Y_batch)
             total_loss += loss.item()
-    
-    return total_loss / len(val_loader)
+
+            all_preds.append(predictions.cpu().numpy())
+            all_targets.append(Y_batch.cpu().numpy())
+
+    preds = np.concatenate(all_preds, axis=0)
+    targets = np.concatenate(all_targets, axis=0)
+
+    # Compute MAE in original scale for early stopping (loss-function-independent)
+    if target_scaler is not None:
+        orig_shape = preds.shape
+        preds_inv = target_scaler.inverse_transform(preds.reshape(-1, 1)).reshape(orig_shape)
+        targets_inv = target_scaler.inverse_transform(targets.reshape(-1, 1)).reshape(orig_shape)
+        val_mae = float(np.mean(np.abs(preds_inv - targets_inv)))
+    else:
+        val_mae = float(np.mean(np.abs(preds - targets)))
+
+    return total_loss / len(val_loader), val_mae
 
 
 def compute_metrics(model, test_loader, adj, config, target_scaler=None):
@@ -782,9 +808,10 @@ def train(config, trial=None):
     print("\n[5/6] Training...")
     print("-" * 60)
     
-    best_val_loss = float('inf')
+    best_val_loss = float('inf')   # used only for LR scheduler
+    best_val_mae = float('inf')    # used for early stopping and checkpoint selection
     patience_counter = 0
-    history = {'train_loss': [], 'val_loss': []}
+    history = {'train_loss': [], 'val_loss': [], 'val_mae': []}
     start_epoch = 0
     
     save_checkpoints = config.get('save_checkpoints', True)
@@ -818,8 +845,9 @@ def train(config, trial=None):
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         start_epoch = checkpoint['epoch'] + 1
         best_val_loss = checkpoint['val_loss']
+        best_val_mae = checkpoint.get('val_mae', float('inf'))
         print(f"  Resuming from epoch {start_epoch}")
-        print(f"  Best validation loss: {best_val_loss:.6f}")
+        print(f"  Best val_loss: {best_val_loss:.6f}, best val_mae: {best_val_mae:.4f}")
     
     for epoch in range(start_epoch, config['epochs']):
         start_time = time.time()
@@ -848,15 +876,16 @@ def train(config, trial=None):
             model, train_loader, optimizer, criterion, adj, config, tf_ratio
         )
 
-        # Validate
-        val_loss = validate(model, val_loader, criterion, adj, config)
+        # Validate — get both loss (for LR scheduler) and MAE (for early stopping)
+        val_loss, val_mae = validate(model, val_loader, criterion, adj, config, target_scaler)
 
-        # Update scheduler
+        # LR scheduler tracks the raw loss (loss-function-aware)
         scheduler.step(val_loss)
 
         # Record history
         history['train_loss'].append(train_loss)
         history['val_loss'].append(val_loss)
+        history['val_mae'].append(val_mae)
 
         elapsed = time.time() - start_time
 
@@ -865,15 +894,18 @@ def train(config, trial=None):
         if config.get('loss_type', 'mse') == 'evt_hybrid' and config.get('evt_use_lambda_schedule', False):
             lambda_str = f"λ: {criterion.lambda_tail:.3f} | "
 
+        scale_label = "µg/m³" if target_scaler is not None else "norm"
         print(f"Epoch {epoch+1:3d}/{config['epochs']} | "
               f"Train Loss: {train_loss:.6f} | "
               f"Val Loss: {val_loss:.6f} | "
+              f"Val MAE: {val_mae:.4f} ({scale_label}) | "
               f"{lambda_str}"
               f"TF: {tf_ratio:.2f} | "
               f"Time: {elapsed:.1f}s")
-        
-        # Early stopping check
-        if val_loss < best_val_loss:
+
+        # Early stopping and checkpoint selection: use val_mae (loss-function-independent)
+        if val_mae < best_val_mae:
+            best_val_mae = val_mae
             best_val_loss = val_loss
             patience_counter = 0
 
@@ -887,6 +919,7 @@ def train(config, trial=None):
                     'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict(),
                     'val_loss': val_loss,
+                    'val_mae': val_mae,
                     'train_loss': train_loss,
                     'config': config,
                     'hardware': {
@@ -903,9 +936,11 @@ def train(config, trial=None):
                     },
                     'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
                 }, checkpoint_path)
-                print(f"  -> Saved best model (val_loss: {val_loss:.6f})")
+                scale_label = "µg/m³" if target_scaler is not None else "norm"
+                print(f"  -> Saved best model (val_mae: {val_mae:.4f} {scale_label})")
             else:
-                print(f"  -> New best model in memory (val_loss: {val_loss:.6f})")
+                scale_label = "µg/m³" if target_scaler is not None else "norm"
+                print(f"  -> New best model in memory (val_mae: {val_mae:.4f} {scale_label})")
         else:
             patience_counter += 1
             if patience_counter >= config['patience']:
@@ -913,8 +948,9 @@ def train(config, trial=None):
                 break
 
         # Report intermediate value for Optuna and prune bad trials early
+        # Use val_mae so pruning is loss-function-independent
         if trial is not None:
-            trial.report(val_loss, step=epoch)
+            trial.report(val_mae, step=epoch)
             if trial.should_prune():
                 raise RuntimeError("TRIAL_PRUNED")
     
@@ -925,7 +961,7 @@ def train(config, trial=None):
     elif best_state_dict is not None:
         model.load_state_dict(best_state_dict)
 
-    metrics = {'best_val_loss': best_val_loss}
+    metrics = {'best_val_loss': best_val_loss, 'best_val_mae': best_val_mae}
     if evaluate_test:
         print("\n[6/6] Evaluating best model...")
         print("-" * 60)

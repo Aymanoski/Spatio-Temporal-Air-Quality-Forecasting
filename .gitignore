@@ -5,6 +5,8 @@ __pycache__/
 models/checkpoints/*.pt
 models/checkpoints/*.pth
 models/checkpoints/*.ckpt
+CLAUDE.md
+state.md
 *.npy
 *.pkl
 *.h5

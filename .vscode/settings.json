@@ -1,5 +1,6 @@
 {
   "files.exclude": {
+    "**/.venv": true,
     "**/__pycache__": true,
     "**/*.pyc": true
   },
@@ -33,6 +34,13 @@
   "python.linting.enabled": true,
   "python.linting.pylintEnabled": false,
   "python.analysis.indexing": false,
+  "python.experiments.enabled": false,
+  "python.experiments.optOutFrom": [
+    "pythonPromptNewToolsExt"
+  ],
+  "python.useEnvironmentsExtension": false,
+  "chatgpt.commentCodeLensEnabled": false,
+  "chatgpt.openOnStartup": false,
   "terminal.integrated.env.windows": {
     "PYTHONDONTWRITEBYTECODE": "1"
   }

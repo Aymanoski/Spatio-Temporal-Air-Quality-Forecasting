@@ -103,9 +103,11 @@ def objective_factory(args):
                 raise TrialPruned()
             raise
 
-        # Objective is minimum validation loss seen in this trial
-        best_val_loss = metrics.get("best_val_loss", min(history["val_loss"]))
-        return float(best_val_loss)
+        # Objective is minimum val_mae (loss-function-independent, on original scale).
+        # Using val_loss would cause Optuna to optimize the EVT loss value, not MAE,
+        # and EVT lambda schedule changes would distort the search.
+        best_val_mae = metrics.get("best_val_mae", min(history.get("val_mae", history["val_loss"])))
+        return float(best_val_mae)
 
     return objective
 
