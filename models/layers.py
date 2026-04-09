@@ -103,11 +103,9 @@ class GraphLSTMCell(nn.Module):
         h, c = hidden
 
         # Apply GCN to input and hidden state (spatial aggregation)
-        # No intermediate activation — graph-aggregated features feed directly into gate
-        # linear transform, matching the paper's formulation:
-        # i_t = σ(W_i(AX_t) + U_i(AH_{t-1}))
-        x_gcn = self.gcn_i(x, adj)  # (batch, num_nodes, hidden_dim)
-        h_gcn = self.gcn_h(h, adj)  # (batch, num_nodes, hidden_dim)
+        # Using LeakyReLU to prevent dead neurons and improve gradient flow
+        x_gcn = F.leaky_relu(self.gcn_i(x, adj), negative_slope=0.1)  # (batch, num_nodes, hidden_dim)
+        h_gcn = F.leaky_relu(self.gcn_h(h, adj), negative_slope=0.1)  # (batch, num_nodes, hidden_dim)
         
         # Concatenate for gate computation
         combined = torch.cat([x_gcn, h_gcn], dim=-1)  # (batch, num_nodes, hidden_dim*2)
