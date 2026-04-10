@@ -155,23 +155,42 @@ def train_version(version_key):
     return model, history, metrics
 
 
-def train_all_versions(start_from=None):
+def train_all_versions(start_from=None, up_to=None):
     """
     Train all versions sequentially.
     
     Args:
         start_from: Version key to start from (e.g., 'v3_evt_loss' to skip v1 and v2)
+        up_to: Version key to stop at (e.g., 'v3_evt_loss' to train only first 3)
     """
     version_keys = list(VERSION_CONFIGS.keys())
-    
-    if start_from:
-        if start_from not in version_keys:
-            print(f"Error: Unknown version '{start_from}'")
-            print(f"Available versions: {', '.join(version_keys)}")
+
+    if start_from and start_from not in version_keys:
+        print(f"Error: Unknown version '{start_from}'")
+        print(f"Available versions: {', '.join(version_keys)}")
+        return
+
+    if up_to and up_to not in version_keys:
+        print(f"Error: Unknown version '{up_to}'")
+        print(f"Available versions: {', '.join(version_keys)}")
+        return
+
+    if start_from and up_to:
+        start_idx = version_keys.index(start_from)
+        end_idx = version_keys.index(up_to)
+        if start_idx > end_idx:
+            print(f"Error: start-from version '{start_from}' comes after up-to version '{up_to}'")
             return
+        version_keys = version_keys[start_idx:end_idx + 1]
+        print(f"\n>>> Training range: {start_from} -> {up_to}")
+    elif start_from:
         start_idx = version_keys.index(start_from)
         version_keys = version_keys[start_idx:]
         print(f"\n>>> Starting from {start_from} (skipping previous versions)")
+    elif up_to:
+        end_idx = version_keys.index(up_to)
+        version_keys = version_keys[:end_idx + 1]
+        print(f"\n>>> Training up to {up_to} (starting from first version)")
     
     print("\n" + "=" * 70)
     print("ABLATION STUDY: TRAINING ALL VERSIONS")
@@ -182,7 +201,7 @@ def train_all_versions(start_from=None):
     print("  - Trains for up to 100 epochs")
     print("  - Has early stopping (patience=15)")
     print("  - Saves best checkpoint automatically")
-    print("\nYou can stop and resume later using --start-from option.")
+    print("\nYou can stop and resume later using --start-from or --up-to options.")
     
     results = {}
     
@@ -274,10 +293,14 @@ def print_usage():
     print("\nUsage:")
     print("  Train all versions:")
     print("    python train_versions.py --all")
+    print("\n  Train first N versions (e.g., first 3):")
+    print("    python train_versions.py --all --up-to v3_evt_loss")
     print("\n  Train specific version:")
     print("    python train_versions.py --version v1_baseline")
     print("\n  Resume from specific version:")
     print("    python train_versions.py --all --start-from v3_evt_loss")
+    print("\n  Train a specific range:")
+    print("    python train_versions.py --all --start-from v2_direct_decoding --up-to v4_wind_adjacency")
     print("\n  List available versions:")
     print("    python train_versions.py --list")
     print("\nAvailable versions:")
@@ -297,9 +320,41 @@ if __name__ == "__main__":
     
     elif command == '--all':
         start_from = None
-        if len(sys.argv) > 3 and sys.argv[2] == '--start-from':
-            start_from = sys.argv[3]
-        train_all_versions(start_from=start_from)
+        up_to = None
+        args = sys.argv[2:]
+
+        i = 0
+        while i < len(args):
+            arg = args[i]
+
+            if arg == '--start-from':
+                if i + 1 >= len(args):
+                    print("Error: Missing value for --start-from")
+                    print_usage()
+                    sys.exit(1)
+                if start_from is not None:
+                    print("Error: --start-from specified more than once")
+                    print_usage()
+                    sys.exit(1)
+                start_from = args[i + 1]
+                i += 2
+            elif arg == '--up-to':
+                if i + 1 >= len(args):
+                    print("Error: Missing value for --up-to")
+                    print_usage()
+                    sys.exit(1)
+                if up_to is not None:
+                    print("Error: --up-to specified more than once")
+                    print_usage()
+                    sys.exit(1)
+                up_to = args[i + 1]
+                i += 2
+            else:
+                print(f"Error: Unknown argument '{arg}' for --all")
+                print_usage()
+                sys.exit(1)
+
+        train_all_versions(start_from=start_from, up_to=up_to)
     
     elif command == '--version':
         if len(sys.argv) < 3:

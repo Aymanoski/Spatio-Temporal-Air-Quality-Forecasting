@@ -85,25 +85,41 @@ def load_model(model_path):
 
 
 def load_data(data_path, config):
-    """Load test data."""
+    """Load test data and scale features to match training-time preprocessing."""
     print(f"\nLoading data from {data_path}...")
-    
+
     X = np.load(os.path.join(data_path, "X.npy"))
     Y = np.load(os.path.join(data_path, "Y.npy"))
     adj = np.load(os.path.join(data_path, "adjacency.npy"))
-    
+
     # Split to get test set (same split as training)
     n_samples = len(X)
     train_end = int(n_samples * config['train_ratio'])
     val_end = int(n_samples * (config['train_ratio'] + config['val_ratio']))
-    
+
     X_test = X[val_end:]
     Y_test = Y[val_end:]
-    
+
+    # Scale X_test features using the saved feature scaler.
+    # X.npy is raw (unscaled); the model was trained on scaled inputs.
+    # Only non-wind features (indices 0..wind_start) are scaled; wind one-hot stays as-is.
+    feature_scaler_path = os.path.join(data_path, "feature_scaler.save")
+    if os.path.exists(feature_scaler_path):
+        feature_scaler = joblib.load(feature_scaler_path)
+        wind_start = config.get('wind_dir_start_idx', 17)
+        n_samples_t, seq_len, n_nodes, n_features = X_test.shape
+        X_flat = X_test.reshape(-1, n_features)
+        X_scaled_features = feature_scaler.transform(X_flat[:, :wind_start])
+        X_scaled_flat = np.concatenate([X_scaled_features, X_flat[:, wind_start:]], axis=1)
+        X_test = X_scaled_flat.reshape(n_samples_t, seq_len, n_nodes, n_features).astype(np.float32)
+        print("  Applied feature scaling to X_test")
+    else:
+        print("  [WARNING] feature_scaler.save not found — X_test is unscaled, results will be wrong")
+
     print(f"  Test samples: {len(X_test)}")
     print(f"  X shape: {X_test.shape}")
     print(f"  Y shape: {Y_test.shape}")
-    
+
     return X_test, Y_test, adj
 
 
@@ -199,17 +215,21 @@ def evaluate(model, X_test, Y_test, adj, config):
 
 
 def inverse_transform(predictions, targets, data_path):
-    """Inverse transform predictions to original scale."""
+    """Inverse transform predictions to original scale.
+
+    predictions: model output in scaled [0,1] space — needs inverse transform.
+    targets: loaded from Y.npy which is raw µg/m³ — already in original scale.
+    """
     scaler_path = os.path.join(data_path, "target_scaler.save")
-    
+
     if os.path.exists(scaler_path):
-        print("\nInverse transforming to original scale...")
+        print("\nInverse transforming predictions to original scale...")
         scaler = joblib.load(scaler_path)
-        
+
         orig_shape = predictions.shape
         predictions = scaler.inverse_transform(predictions.reshape(-1, 1)).reshape(orig_shape)
-        targets = scaler.inverse_transform(targets.reshape(-1, 1)).reshape(orig_shape)
-        
+        # targets (Y.npy) are already in µg/m³ — do NOT inverse transform them
+
         return predictions, targets, True
     else:
         print("\nNo scaler found, using normalized values...")
