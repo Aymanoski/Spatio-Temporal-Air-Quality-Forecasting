@@ -126,6 +126,7 @@ def print_version_info(version_key):
     print(f"  Learning Rate: {config['learning_rate']}")
     print(f"  Direct Decoding: {config['use_direct_decoding']}")
     print(f"  Wind Adjacency: {config['use_wind_adjacency']}")
+    print(f"  Learnable Alpha Gate: {config.get('use_learnable_alpha_gate', False)}")
     print(f"  Loss Type: {config['loss_type']}")
     
     if config['loss_type'] == 'evt_hybrid':

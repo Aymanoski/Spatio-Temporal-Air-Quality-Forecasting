@@ -13,7 +13,7 @@ import joblib
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models import GCNLSTMModel
-from utils.graph import build_wind_aware_adjacency_batch, WIND_CATEGORIES
+from utils.graph import build_wind_aware_adjacency_batch, build_dynamic_adjacency_gpu, WIND_CATEGORIES
 
 
 # ============================================================================
@@ -71,7 +71,9 @@ def load_model(model_path):
         num_heads=config['num_heads'],
         dropout=config['dropout'],
         horizon=config.get('horizon', 6),
-        use_direct_decoding=config.get('use_direct_decoding', False)
+        use_direct_decoding=config.get('use_direct_decoding', False),
+        use_learnable_alpha_gate=config.get('use_learnable_alpha_gate', False),
+        initial_wind_alpha=config.get('wind_alpha', 0.6)
     )
     
     model.load_state_dict(checkpoint['model_state_dict'])
@@ -148,7 +150,7 @@ def extract_wind_features(X_batch, config):
     return wind_speeds, wind_directions
 
 
-def build_dynamic_adjacency(X_batch, config, device):
+def build_dynamic_adjacency(X_batch, config, device, alpha_override=None):
     """
     Build dynamic wind-aware adjacency matrix for a batch.
 
@@ -160,6 +162,9 @@ def build_dynamic_adjacency(X_batch, config, device):
     Returns:
         adj_batch: (batch, num_nodes, num_nodes) tensor
     """
+    if X_batch.is_cuda or alpha_override is not None:
+        return build_dynamic_adjacency_gpu(X_batch, config, alpha_override=alpha_override)
+
     wind_speeds, wind_directions = extract_wind_features(X_batch, config)
 
     # Build wind-aware adjacency
@@ -167,7 +172,7 @@ def build_dynamic_adjacency(X_batch, config, device):
         wind_speeds=wind_speeds,
         wind_directions=wind_directions,
         wind_categories=WIND_CATEGORIES,
-        alpha=config.get('wind_alpha', 0.6),
+        alpha=config.get('wind_alpha', 0.6) if alpha_override is None else float(alpha_override),
         distance_sigma=config.get('distance_sigma', 1800),
         aggregation_mode=config.get('wind_aggregation_mode', 'recent_weighted'),
         recency_beta=config.get('wind_recency_beta', 3.0),
@@ -202,7 +207,8 @@ def evaluate(model, X_test, Y_test, adj, config):
 
             # Build dynamic adjacency if enabled
             if use_wind_adj:
-                adj_batch = build_dynamic_adjacency(batch_x, config, device)
+                alpha_override = model.get_wind_alpha() if hasattr(model, 'get_wind_alpha') else None
+                adj_batch = build_dynamic_adjacency(batch_x, config, device, alpha_override=alpha_override)
             else:
                 adj_batch = adj_tensor
 

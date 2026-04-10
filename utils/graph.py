@@ -626,7 +626,12 @@ def build_wind_aware_adjacency_gpu(
     eye_batch = torch.eye(num_nodes, device=device).unsqueeze(0)  # (1, N, N)
     A_wind = A_wind + eye_batch
 
-    # Hybrid adjacency
+    # Hybrid adjacency. Alpha may be a float or a trainable scalar tensor.
+    if not torch.is_tensor(alpha):
+        alpha = torch.tensor(float(alpha), dtype=wind_speeds.dtype, device=device)
+    else:
+        alpha = alpha.to(device=device, dtype=wind_speeds.dtype)
+
     A = (1 - alpha) * A_dist.unsqueeze(0) + alpha * A_wind  # (batch, N, N)
 
     # Row normalization
@@ -712,7 +717,7 @@ def aggregate_wind_gpu(wind_speeds, wind_directions, mode="recent_weighted",
     return agg_speeds, agg_angles
 
 
-def build_dynamic_adjacency_gpu(X_batch, config):
+def build_dynamic_adjacency_gpu(X_batch, config, alpha_override=None):
     """
     Build dynamic wind-aware adjacency on GPU (no CPU transfer).
 
@@ -744,7 +749,7 @@ def build_dynamic_adjacency_gpu(X_batch, config):
     adj_batch = build_wind_aware_adjacency_gpu(
         agg_speeds,
         agg_angles,
-        alpha=config['wind_alpha'],
+        alpha=config['wind_alpha'] if alpha_override is None else alpha_override,
         distance_sigma=config['distance_sigma'],
         calm_speed_threshold=config.get('wind_calm_speed_threshold', 0.1)
     )

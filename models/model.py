@@ -98,7 +98,9 @@ class GCNLSTMModel(nn.Module):
         num_heads=4,
         dropout=0.1,
         horizon=6,
-        use_direct_decoding=False
+        use_direct_decoding=False,
+        use_learnable_alpha_gate=False,
+        initial_wind_alpha=0.6
     ):
         super().__init__()
         
@@ -108,6 +110,14 @@ class GCNLSTMModel(nn.Module):
         self.num_nodes = num_nodes
         self.num_layers = num_layers
         self.use_direct_decoding = use_direct_decoding
+        self.use_learnable_alpha_gate = use_learnable_alpha_gate
+
+        if use_learnable_alpha_gate:
+            alpha = float(initial_wind_alpha)
+            alpha = min(max(alpha, 1e-4), 1.0 - 1e-4)
+            self.alpha_logit = nn.Parameter(torch.logit(torch.tensor(alpha, dtype=torch.float32)))
+        else:
+            self.register_parameter('alpha_logit', None)
         
         # Encoder: Stacked Graph LSTM layers
         self.encoder = GraphLSTMEncoder(
@@ -206,6 +216,12 @@ class GCNLSTMModel(nn.Module):
         """Return total number of trainable parameters."""
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
+    def get_wind_alpha(self):
+        """Return the current graph-mixing weight alpha in [0, 1]."""
+        if not self.use_learnable_alpha_gate or self.alpha_logit is None:
+            return None
+        return torch.sigmoid(self.alpha_logit)
+
 
 def create_model(config):
     """
@@ -226,5 +242,7 @@ def create_model(config):
         num_heads=config.get('num_heads', 4),
         dropout=config.get('dropout', 0.1),
         horizon=config.get('horizon', 6),
-        use_direct_decoding=config.get('use_direct_decoding', False)
+        use_direct_decoding=config.get('use_direct_decoding', False),
+        use_learnable_alpha_gate=config.get('use_learnable_alpha_gate', False),
+        initial_wind_alpha=config.get('wind_alpha', 0.6)
     )

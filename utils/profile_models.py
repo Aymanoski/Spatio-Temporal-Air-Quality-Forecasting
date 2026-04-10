@@ -239,7 +239,9 @@ def profile_model_from_checkpoint(checkpoint_path, batch_size=32):
         num_heads=config['num_heads'],
         dropout=config['dropout'],
         horizon=config['horizon'],
-        use_direct_decoding=config.get('use_direct_decoding', False)
+        use_direct_decoding=config.get('use_direct_decoding', False),
+        use_learnable_alpha_gate=config.get('use_learnable_alpha_gate', False),
+        initial_wind_alpha=config.get('wind_alpha', 0.6)
     )
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
