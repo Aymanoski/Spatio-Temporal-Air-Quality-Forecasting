@@ -211,7 +211,8 @@ class DirectMultiHorizonDecoder(nn.Module):
         num_layers=2,
         num_heads=4,
         dropout=0.1,
-        max_horizon=24  # Maximum supported horizon for flexibility
+        max_horizon=24,  # Maximum supported horizon for flexibility
+        use_attention=True
     ):
         super().__init__()
         self.output_dim = output_dim
@@ -220,21 +221,25 @@ class DirectMultiHorizonDecoder(nn.Module):
         self.horizon = horizon
         self.max_horizon = max(horizon, max_horizon)
         self.num_layers = num_layers
+        self.use_attention = use_attention
 
         # Learnable step query embeddings: support up to max_horizon steps
         # This allows flexible horizon at inference time
         self.step_queries = nn.Parameter(torch.empty(self.max_horizon, hidden_dim))
         nn.init.xavier_uniform_(self.step_queries)
 
-        # Multi-head attention over encoder outputs (shared across horizon steps)
-        self.attention = MultiHeadAttention(
-            hidden_dim=hidden_dim,
-            num_heads=num_heads,
-            dropout=dropout
-        )
-
-        # Project [query || context] -> hidden_dim
-        self.context_proj = nn.Linear(hidden_dim * 2, hidden_dim)
+        if use_attention:
+            # Multi-head attention over encoder outputs (shared across horizon steps)
+            self.attention = MultiHeadAttention(
+                hidden_dim=hidden_dim,
+                num_heads=num_heads,
+                dropout=dropout
+            )
+            # Project [query || context] -> hidden_dim
+            self.context_proj = nn.Linear(hidden_dim * 2, hidden_dim)
+        else:
+            # No attention: project query directly to hidden_dim
+            self.context_proj = nn.Linear(hidden_dim, hidden_dim)
 
         # Shared Graph-LSTM layers applied independently per horizon step
         self.layers = nn.ModuleList([
@@ -303,17 +308,23 @@ class DirectMultiHorizonDecoder(nn.Module):
             # Combine learnable step intent with encoder's final hidden state
             query = step_q + final_h  # (batch, num_nodes, hidden_dim)
 
-            # Attend over the full encoder sequence
-            context, attn_weights = self.attention(
-                query=query,
-                key=encoder_outputs,
-                value=encoder_outputs
-            )
-            attention_weights_all.append(attn_weights)
-
-            # Fuse query and context
-            combined = torch.cat([query, context], dim=-1)  # (batch, num_nodes, hidden_dim*2)
-            combined = self.context_proj(combined)           # (batch, num_nodes, hidden_dim)
+            if self.use_attention:
+                # Attend over the full encoder sequence
+                context, attn_weights = self.attention(
+                    query=query,
+                    key=encoder_outputs,
+                    value=encoder_outputs
+                )
+                attention_weights_all.append(attn_weights)
+                # Fuse query and context
+                combined = torch.cat([query, context], dim=-1)  # (batch, num_nodes, hidden_dim*2)
+                combined = self.context_proj(combined)           # (batch, num_nodes, hidden_dim)
+            else:
+                # No attention: project query directly
+                attention_weights_all.append(torch.zeros(
+                    batch_size, self.num_nodes, 1, 1, device=encoder_outputs.device
+                ))
+                combined = self.context_proj(query)  # (batch, num_nodes, hidden_dim)
             combined = self.dropout(combined)
 
             # Process through Graph-LSTM layers with Pre-LN pattern.

@@ -102,6 +102,7 @@ class GCNLSTMModel(nn.Module):
         use_learnable_alpha_gate=False,
         initial_wind_alpha=0.6,
         use_node_embeddings=True,
+        use_attention=True,
     ):
         super().__init__()
 
@@ -113,6 +114,7 @@ class GCNLSTMModel(nn.Module):
         self.use_direct_decoding = use_direct_decoding
         self.use_learnable_alpha_gate = use_learnable_alpha_gate
         self.use_node_embeddings = use_node_embeddings
+        self.use_attention = use_attention
 
         if use_learnable_alpha_gate:
             alpha = float(initial_wind_alpha)
@@ -141,7 +143,8 @@ class GCNLSTMModel(nn.Module):
                 num_layers=num_layers,
                 num_heads=num_heads,
                 dropout=dropout,
-                max_horizon=max(horizon, 24)  # Support up to 24h forecasts
+                max_horizon=max(horizon, 24),  # Support up to 24h forecasts
+                use_attention=use_attention
             )
         else:
             # Autoregressive decoder: each step feeds into the next
@@ -248,4 +251,5 @@ def create_model(config):
         use_learnable_alpha_gate=config.get('use_learnable_alpha_gate', False),
         initial_wind_alpha=config.get('wind_alpha', 0.6),
         use_node_embeddings=config.get('use_node_embeddings', True),
+        use_attention=config.get('use_attention', True),
     )

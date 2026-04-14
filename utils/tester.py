@@ -117,12 +117,35 @@ def load_processed_metadata(data_path: Path) -> dict[str, Any]:
     return {}
 
 
-def get_current_feature_cols(data_path: Path) -> list[str]:
+def normalize_angle_feature_names(feature_cols: list[str]) -> list[str]:
+    # Older metadata may use wd_sin/wd_cos for the same semantic features.
+    rename_map = {"wd_sin": "wind_dir_sin", "wd_cos": "wind_dir_cos"}
+    return [rename_map.get(col, col) for col in feature_cols]
+
+
+def get_current_feature_cols(data_path: Path, observed_feature_dim: int | None = None) -> list[str]:
     metadata = load_processed_metadata(data_path)
     feature_cols = metadata.get("feature_cols")
+
     if isinstance(feature_cols, list) and feature_cols:
-        return feature_cols
-    return BASE_33_FEATURE_COLS
+        normalized = normalize_angle_feature_names(list(feature_cols))
+        if observed_feature_dim is None or len(normalized) == observed_feature_dim:
+            return normalized
+
+    if observed_feature_dim is None:
+        return BASE_33_FEATURE_COLS
+
+    if observed_feature_dim == len(BASE_33_FEATURE_COLS):
+        return list(BASE_33_FEATURE_COLS)
+    if observed_feature_dim == len(LEGACY_35_FEATURE_COLS):
+        return list(LEGACY_35_FEATURE_COLS)
+    if observed_feature_dim == 19:
+        return BASE_33_FEATURE_COLS[:17] + ANGLE_FEATURE_COLS
+
+    raise ValueError(
+        f"Cannot infer feature column layout for observed tensor dimension={observed_feature_dim}. "
+        "Please provide consistent metadata.feature_cols for this dataset."
+    )
 
 
 def infer_checkpoint_feature_cols(config: dict[str, Any], current_feature_cols: list[str]) -> list[str]:
@@ -217,6 +240,8 @@ def prepare_checkpoint_config(checkpoint: dict[str, Any], device: str) -> dict[s
     config.update(checkpoint.get("config", {}))
 
     state_dict = checkpoint["model_state_dict"]
+    config["use_direct_decoding"] = "decoder.step_queries" in state_dict
+    config["use_attention"] = any(key.startswith("decoder.attention.") for key in state_dict)
     config["use_learnable_alpha_gate"] = "alpha_logit" in state_dict
     config["use_learnable_sigma"] = "log_sigma" in state_dict
     config["use_node_embeddings"] = any(key.startswith("encoder.node_embed.") for key in state_dict)
@@ -372,11 +397,11 @@ def evaluate_checkpoint(
     checkpoint = torch.load(checkpoint_path, weights_only=False, map_location="cpu")
     config = prepare_checkpoint_config(checkpoint, device=device)
 
-    current_feature_cols = get_current_feature_cols(data_path)
+    raw_X, raw_Y, adj = load_raw_data(data_path)
+    current_feature_cols = get_current_feature_cols(data_path, observed_feature_dim=int(raw_X.shape[-1]))
     checkpoint_feature_cols = infer_checkpoint_feature_cols(config, current_feature_cols)
     refresh_feature_config(config, checkpoint_feature_cols)
 
-    raw_X, raw_Y, adj = load_raw_data(data_path)
     aligned_X = align_feature_tensor(raw_X, current_feature_cols, checkpoint_feature_cols)
 
     train_data, val_data, test_data = split_data(aligned_X, raw_Y, config)

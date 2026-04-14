@@ -40,7 +40,8 @@ CONFIG = {
     'num_heads': 4,         # Attention heads
     'dropout': 0.1,
     'use_direct_decoding': True,  # Direct multi-horizon decoding (no autoregression)
-    
+    'use_attention': False,        # MHA tested and removed — zero measurable effect (2026-04-14)
+
     # Training
     'batch_size': 32,
     'learning_rate': 1e-3,
@@ -99,7 +100,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'gcn_lstm_v2',     # v2: wind adjacency + direct decoding + evt_hybrid (λ=0.05)
+    'architecture_name': 'gcn_lstm_v2',  # final GCN-LSTM: alpha + embeddings + EVT + dynamic adj, no MHA
     'hardware_tag': 'T4',       # Options: 'integrated_gpu', 'T4', 'rtx3090', etc.
     'use_versioned_checkpoint': True,       # If True, saves as <arch>_<hardware>_best.pt
 
