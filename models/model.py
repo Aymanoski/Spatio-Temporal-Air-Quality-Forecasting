@@ -100,10 +100,11 @@ class GCNLSTMModel(nn.Module):
         horizon=6,
         use_direct_decoding=False,
         use_learnable_alpha_gate=False,
-        initial_wind_alpha=0.6
+        initial_wind_alpha=0.6,
+        use_node_embeddings=True,
     ):
         super().__init__()
-        
+
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.output_dim = output_dim
@@ -111,6 +112,7 @@ class GCNLSTMModel(nn.Module):
         self.num_layers = num_layers
         self.use_direct_decoding = use_direct_decoding
         self.use_learnable_alpha_gate = use_learnable_alpha_gate
+        self.use_node_embeddings = use_node_embeddings
 
         if use_learnable_alpha_gate:
             alpha = float(initial_wind_alpha)
@@ -125,7 +127,8 @@ class GCNLSTMModel(nn.Module):
             hidden_dim=hidden_dim,
             num_nodes=num_nodes,
             num_layers=num_layers,
-            dropout=dropout
+            dropout=dropout,
+            use_node_embeddings=use_node_embeddings
         )
         
         if use_direct_decoding:
@@ -222,7 +225,6 @@ class GCNLSTMModel(nn.Module):
             return None
         return torch.sigmoid(self.alpha_logit)
 
-
 def create_model(config):
     """
     Factory function to create model from config dictionary.
@@ -244,5 +246,6 @@ def create_model(config):
         horizon=config.get('horizon', 6),
         use_direct_decoding=config.get('use_direct_decoding', False),
         use_learnable_alpha_gate=config.get('use_learnable_alpha_gate', False),
-        initial_wind_alpha=config.get('wind_alpha', 0.6)
+        initial_wind_alpha=config.get('wind_alpha', 0.6),
+        use_node_embeddings=config.get('use_node_embeddings', True),
     )

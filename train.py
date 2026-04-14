@@ -75,6 +75,7 @@ CONFIG = {
     'use_wind_adjacency': True,    # Use dynamic wind-aware adjacency
     'wind_alpha': 0.6,             # Wind influence weight (0=distance-only, 1=wind-only)
     'use_learnable_alpha_gate': False,  # Learn alpha instead of keeping wind_alpha fixed
+    'use_node_embeddings': True,        # Learnable per-station identity embeddings (post-LN injection)
     'distance_sigma': 1800,        # Distance decay parameter (calibrated for Beijing ~35km mean)
     'wind_aggregation_mode': 'recent_weighted',  # 'recent_weighted' | 'last' | 'mean'
     'wind_recency_beta': 3.0,      # Recency emphasis for recent_weighted aggregation
@@ -295,7 +296,7 @@ def extract_wind_features(X_batch, config):
     return wind_speeds, wind_directions
 
 
-def build_dynamic_adjacency(X_batch, config, device, alpha_override=None):
+def build_dynamic_adjacency(X_batch, config, device, alpha_override=None, sigma_override=None):
     """
     Build dynamic wind-aware adjacency matrix for a batch.
     Uses GPU-optimized computation when possible.
@@ -304,14 +305,20 @@ def build_dynamic_adjacency(X_batch, config, device, alpha_override=None):
         X_batch: (batch, timesteps, num_nodes, features) tensor
         config: configuration dict
         device: torch device
+        alpha_override: learnable alpha tensor from model.get_wind_alpha() — keeps grad flow
+        sigma_override: learnable sigma tensor from model.get_distance_sigma() — keeps grad flow
 
     Returns:
         adj_batch: (batch, num_nodes, num_nodes) tensor
     """
-    # Use the torch implementation whenever alpha is learnable so gradients can
-    # flow from the loss back into the mixing weight.
-    if X_batch.is_cuda or alpha_override is not None:
-        return build_dynamic_adjacency_gpu(X_batch, config, alpha_override=alpha_override)
+    # Use the torch implementation whenever either parameter is learnable so
+    # gradients can flow from the loss back through the adjacency construction.
+    if X_batch.is_cuda or alpha_override is not None or sigma_override is not None:
+        return build_dynamic_adjacency_gpu(
+            X_batch, config,
+            alpha_override=alpha_override,
+            sigma_override=sigma_override
+        )
 
     # Fallback to CPU version for non-GPU tensors
     wind_speeds, wind_directions = extract_wind_features(X_batch, config)
@@ -751,7 +758,7 @@ def train(config, trial=None):
         horizon=config['horizon'],
         use_direct_decoding=config.get('use_direct_decoding', False),
         use_learnable_alpha_gate=config.get('use_learnable_alpha_gate', False),
-        initial_wind_alpha=config.get('wind_alpha', 0.6)
+        initial_wind_alpha=config.get('wind_alpha', 0.6),
     ).to(device)
 
     print(f"  Model parameters: {model.get_num_params():,}")
@@ -888,7 +895,10 @@ def train(config, trial=None):
         # Validate — get both loss (for LR scheduler) and MAE (for early stopping)
         val_loss, val_mae = validate(model, val_loader, criterion, adj, config, target_scaler)
 
-        # LR scheduler tracks the raw loss (loss-function-aware)
+        # LR scheduler tracks val_loss.
+        # NOTE: if evt_use_lambda_schedule is ever re-enabled, consider switching
+        # this to val_mae — lambda changes alter val_loss scale independently of
+        # model quality and can trigger spurious LR reductions.
         scheduler.step(val_loss)
 
         # Record history

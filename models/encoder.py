@@ -26,17 +26,27 @@ class GraphLSTMEncoder(nn.Module):
         hidden_dim,
         num_nodes,
         num_layers=2,
-        dropout=0.1
+        dropout=0.1,
+        use_node_embeddings=True
     ):
         super().__init__()
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.num_nodes = num_nodes
         self.num_layers = num_layers
+        self.use_node_embeddings = use_node_embeddings
         
         # Input projection
         self.input_proj = nn.Linear(input_dim, hidden_dim)
-        
+
+        if use_node_embeddings:
+            # Learnable node identity embeddings — injected after Pre-LN inside each
+            # LSTM step so LayerNorm cannot re-center them away before the cell sees them.
+            self.node_embed = nn.Embedding(num_nodes, hidden_dim)
+            nn.init.normal_(self.node_embed.weight, mean=0.0, std=0.01)
+        else:
+            self.register_parameter("node_embed", None)
+
         # Positional encoding for temporal awareness
         self.pos_encoding = PositionalEncoding(hidden_dim, dropout=dropout)
         
@@ -86,6 +96,15 @@ class GraphLSTMEncoder(nn.Module):
         # Store outputs for attention
         encoder_outputs = []
         
+        if self.use_node_embeddings:
+            # Compute node embeddings once per forward pass — shape (num_nodes, hidden_dim).
+            # These are injected after Pre-LN at every layer and timestep so that
+            # LayerNorm cannot re-center the station identity signal before the cell sees it.
+            node_ids = torch.arange(num_nodes, device=device)
+            node_embed = self.node_embed(node_ids)  # (num_nodes, hidden_dim)
+        else:
+            node_embed = None
+
         # Process sequence timestep by timestep
         for t in range(seq_len):
             # Current input: (batch, num_nodes, hidden_dim)
@@ -97,6 +116,11 @@ class GraphLSTMEncoder(nn.Module):
 
                 # Pre-LN: normalize BEFORE the layer (more stable training)
                 layer_input_norm = norm(layer_input)
+
+                if node_embed is not None:
+                    # Inject node identity after Pre-LN so normalization cannot
+                    # re-center it. Broadcasts over the batch dimension.
+                    layer_input_norm = layer_input_norm + node_embed.unsqueeze(0)
 
                 # Graph LSTM cell forward
                 h_new, c_new = layer(layer_input_norm, (h, c), adj)

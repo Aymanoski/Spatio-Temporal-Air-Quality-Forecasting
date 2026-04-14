@@ -579,6 +579,14 @@ def build_wind_aware_adjacency_gpu(
     # Calm mask: calm or explicitly marked as -1
     calm_mask = (wind_angles < 0) | (wind_speeds < calm_speed_threshold)
 
+    # Normalise distance_sigma to the correct device/dtype before first use.
+    # It may arrive as a plain float (static config) or a trainable scalar tensor
+    # (learnable sigma path). Both must land on the same device as wind_speeds.
+    if not torch.is_tensor(distance_sigma):
+        distance_sigma = torch.tensor(float(distance_sigma), dtype=wind_speeds.dtype, device=device)
+    else:
+        distance_sigma = distance_sigma.to(device=device, dtype=wind_speeds.dtype)
+
     # Distance-based component (broadcasted for batch)
     dist_decay = torch.exp(-dist.pow(2) / distance_sigma)  # (N, N)
     A_dist = dist_decay + torch.eye(num_nodes, device=device)  # Add self-loops
@@ -717,13 +725,17 @@ def aggregate_wind_gpu(wind_speeds, wind_directions, mode="recent_weighted",
     return agg_speeds, agg_angles
 
 
-def build_dynamic_adjacency_gpu(X_batch, config, alpha_override=None):
+def build_dynamic_adjacency_gpu(X_batch, config, alpha_override=None, sigma_override=None):
     """
     Build dynamic wind-aware adjacency on GPU (no CPU transfer).
 
     Args:
         X_batch: (batch, timesteps, num_nodes, features) tensor ON GPU
         config: Configuration dict
+        alpha_override: If provided (scalar tensor or float), overrides config['wind_alpha'].
+                        Pass model.get_distance_sigma() to allow gradient flow into alpha.
+        sigma_override: If provided (scalar tensor or float), overrides config['distance_sigma'].
+                        Pass model.get_distance_sigma() to allow gradient flow into sigma.
 
     Returns:
         adj_batch: (batch, num_nodes, num_nodes) tensor ON GPU
@@ -750,7 +762,7 @@ def build_dynamic_adjacency_gpu(X_batch, config, alpha_override=None):
         agg_speeds,
         agg_angles,
         alpha=config['wind_alpha'] if alpha_override is None else alpha_override,
-        distance_sigma=config['distance_sigma'],
+        distance_sigma=config['distance_sigma'] if sigma_override is None else sigma_override,
         calm_speed_threshold=config.get('wind_calm_speed_threshold', 0.1)
     )
 
