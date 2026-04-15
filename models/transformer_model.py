@@ -11,7 +11,7 @@ Architecture:
     → reshape (B, T, N, H) → (B*N, T, H)
     → sinusoidal positional encoding over T
     → small Transformer encoder (2 layers, Pre-LN, shared weights across nodes)
-    → mean-pool over T → (B, N, H)
+    → last timestep token → (B, N, H)
     → direct multi-horizon head:
         for each step t: final_h + learned step_query[t] → 2-layer MLP → scalar
     → output (B, horizon, N, output_dim)
@@ -168,10 +168,9 @@ class SpatioTemporalTransformerEncoder(nn.Module):
         # Full bidirectional attention: no causal mask needed (we have the full history)
         x = self.transformer(x)    # (B*N, T, H)
 
-        # Mean-pool over T: every timestep contributes equally to the summary.
-        # More robust than last-token for a bidirectional encoder with no
-        # structural pressure to concentrate information at position T-1.
-        x = x.mean(dim=1)          # (B*N, H)
+        # Last timestep: represents the model state after seeing the full 24h window.
+        # Forecasting-natural — analogous to an LSTM's final hidden state.
+        x = x[:, -1, :]            # (B*N, H)
 
         # Reshape to (B, N, H)
         return x.reshape(B, N, self.hidden_dim)
