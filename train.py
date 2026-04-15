@@ -14,7 +14,7 @@ import time
 import random
 import joblib
 from sklearn.preprocessing import MinMaxScaler
-from models import GCNLSTMModel
+from models import GCNLSTMModel, GraphTransformerModel
 from utils.graph import (
     build_wind_aware_adjacency_batch,
     build_dynamic_adjacency_gpu,
@@ -41,6 +41,12 @@ CONFIG = {
     'dropout': 0.1,
     'use_direct_decoding': True,  # Direct multi-horizon decoding (no autoregression)
     'use_attention': False,        # MHA tested and removed — zero measurable effect (2026-04-14)
+
+    # Model type switch
+    # 'gcn_lstm'         — original GraphLSTM encoder-decoder (recurrent baseline)
+    # 'graph_transformer'— GCN per-timestep + Transformer encoder + direct head (new)
+    'model_type': 'graph_transformer',
+    'num_tf_layers': 2,  # Transformer encoder layers (graph_transformer only)
 
     # Training
     'batch_size': 32,
@@ -100,7 +106,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'gcn_lstm_v2',  # final GCN-LSTM: alpha + embeddings + EVT + dynamic adj, no MHA
+    'architecture_name': 'graph_transformer_v1',  # GCN+Transformer: dynamic adj + node emb + direct head + EVT
     'hardware_tag': 'T4',       # Options: 'integrated_gpu', 'T4', 'rtx3090', etc.
     'use_versioned_checkpoint': True,       # If True, saves as <arch>_<hardware>_best.pt
 
@@ -748,19 +754,37 @@ def train(config, trial=None):
 
     # Create model
     print("\n[4/6] Creating model...")
-    model = GCNLSTMModel(
-        input_dim=config['input_dim'],
-        hidden_dim=config['hidden_dim'],
-        output_dim=config['output_dim'],
-        num_nodes=config['num_nodes'],
-        num_layers=config['num_layers'],
-        num_heads=config['num_heads'],
-        dropout=config['dropout'],
-        horizon=config['horizon'],
-        use_direct_decoding=config.get('use_direct_decoding', False),
-        use_learnable_alpha_gate=config.get('use_learnable_alpha_gate', False),
-        initial_wind_alpha=config.get('wind_alpha', 0.6),
-    ).to(device)
+    model_type = config.get('model_type', 'gcn_lstm')
+    if model_type == 'graph_transformer':
+        model = GraphTransformerModel(
+            input_dim=config['input_dim'],
+            hidden_dim=config['hidden_dim'],
+            output_dim=config['output_dim'],
+            num_nodes=config['num_nodes'],
+            num_tf_layers=config.get('num_tf_layers', 2),
+            num_heads=config['num_heads'],
+            dropout=config['dropout'],
+            horizon=config['horizon'],
+            use_node_embeddings=config.get('use_node_embeddings', True),
+            use_learnable_alpha_gate=config.get('use_learnable_alpha_gate', False),
+            initial_wind_alpha=config.get('wind_alpha', 0.6),
+        ).to(device)
+        print(f"  Model type: GraphTransformerModel")
+    else:
+        model = GCNLSTMModel(
+            input_dim=config['input_dim'],
+            hidden_dim=config['hidden_dim'],
+            output_dim=config['output_dim'],
+            num_nodes=config['num_nodes'],
+            num_layers=config['num_layers'],
+            num_heads=config['num_heads'],
+            dropout=config['dropout'],
+            horizon=config['horizon'],
+            use_direct_decoding=config.get('use_direct_decoding', False),
+            use_learnable_alpha_gate=config.get('use_learnable_alpha_gate', False),
+            initial_wind_alpha=config.get('wind_alpha', 0.6),
+        ).to(device)
+        print(f"  Model type: GCNLSTMModel")
 
     print(f"  Model parameters: {model.get_num_params():,}")
     if config.get('use_wind_adjacency', False) and config.get('use_learnable_alpha_gate', False):
