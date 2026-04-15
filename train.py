@@ -45,8 +45,13 @@ CONFIG = {
     # Model type switch
     # 'gcn_lstm'         — original GraphLSTM encoder-decoder (recurrent baseline)
     # 'graph_transformer'— GCN per-timestep + Transformer encoder + direct head (new)
-    'model_type': 'graph_transformer',
+    'model_type': 'gcn_lstm',
     'num_tf_layers': 2,  # Transformer encoder layers (graph_transformer only)
+
+    # Graph convolution type ('gcn' | 'gat')
+    # 'gcn' — original GraphConvolution with normalized adjacency (default, backward-compatible)
+    # 'gat' — GraphAttentionLayer: learned attention + wind-aware adjacency as additive bias
+    'graph_conv': 'gat',
 
     # Training
     'batch_size': 32,
@@ -106,7 +111,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_v1',  # GCN+Transformer: dynamic adj + node emb + direct head + EVT
+    'architecture_name': 'gcn_lstm_gat_v1',  # GCN-LSTM + GAT spatial: ablation against gcn_lstm_v2
     'hardware_tag': 'T4',       # Options: 'integrated_gpu', 'T4', 'rtx3090', etc.
     'use_versioned_checkpoint': True,       # If True, saves as <arch>_<hardware>_best.pt
 
@@ -768,8 +773,9 @@ def train(config, trial=None):
             use_node_embeddings=config.get('use_node_embeddings', True),
             use_learnable_alpha_gate=config.get('use_learnable_alpha_gate', False),
             initial_wind_alpha=config.get('wind_alpha', 0.6),
+            graph_conv=config.get('graph_conv', 'gcn'),
         ).to(device)
-        print(f"  Model type: GraphTransformerModel")
+        print(f"  Model type: GraphTransformerModel  graph_conv={config.get('graph_conv', 'gcn')}")
     else:
         model = GCNLSTMModel(
             input_dim=config['input_dim'],
@@ -783,8 +789,9 @@ def train(config, trial=None):
             use_direct_decoding=config.get('use_direct_decoding', False),
             use_learnable_alpha_gate=config.get('use_learnable_alpha_gate', False),
             initial_wind_alpha=config.get('wind_alpha', 0.6),
+            graph_conv=config.get('graph_conv', 'gcn'),
         ).to(device)
-        print(f"  Model type: GCNLSTMModel")
+        print(f"  Model type: GCNLSTMModel  graph_conv={config.get('graph_conv', 'gcn')}")
 
     print(f"  Model parameters: {model.get_num_params():,}")
     if config.get('use_wind_adjacency', False) and config.get('use_learnable_alpha_gate', False):

@@ -103,6 +103,7 @@ class GCNLSTMModel(nn.Module):
         initial_wind_alpha=0.6,
         use_node_embeddings=True,
         use_attention=True,
+        graph_conv='gcn',
     ):
         super().__init__()
 
@@ -115,6 +116,7 @@ class GCNLSTMModel(nn.Module):
         self.use_learnable_alpha_gate = use_learnable_alpha_gate
         self.use_node_embeddings = use_node_embeddings
         self.use_attention = use_attention
+        self.graph_conv = graph_conv
 
         if use_learnable_alpha_gate:
             alpha = float(initial_wind_alpha)
@@ -130,7 +132,8 @@ class GCNLSTMModel(nn.Module):
             num_nodes=num_nodes,
             num_layers=num_layers,
             dropout=dropout,
-            use_node_embeddings=use_node_embeddings
+            use_node_embeddings=use_node_embeddings,
+            graph_conv=graph_conv,
         )
         
         if use_direct_decoding:
@@ -143,8 +146,9 @@ class GCNLSTMModel(nn.Module):
                 num_layers=num_layers,
                 num_heads=num_heads,
                 dropout=dropout,
-                max_horizon=max(horizon, 24),  # Support up to 24h forecasts
-                use_attention=use_attention
+                max_horizon=max(horizon, 24),
+                use_attention=use_attention,
+                graph_conv=graph_conv,
             )
         else:
             # Autoregressive decoder: each step feeds into the next
@@ -154,7 +158,8 @@ class GCNLSTMModel(nn.Module):
                 num_nodes=num_nodes,
                 num_layers=num_layers,
                 num_heads=num_heads,
-                dropout=dropout
+                dropout=dropout,
+                graph_conv=graph_conv,
             )
     
     def forward(self, x, adj, target=None, horizon=6, teacher_forcing_ratio=0.5):
@@ -252,4 +257,5 @@ def create_model(config):
         initial_wind_alpha=config.get('wind_alpha', 0.6),
         use_node_embeddings=config.get('use_node_embeddings', True),
         use_attention=config.get('use_attention', True),
+        graph_conv=config.get('graph_conv', 'gcn'),
     )

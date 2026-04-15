@@ -29,6 +29,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from .layers import GraphAttentionLayer
 
 
 class TemporalPositionalEncoding(nn.Module):
@@ -78,11 +79,13 @@ class SpatioTemporalTransformerEncoder(nn.Module):
         ffn_dim: int = None,
         dropout: float = 0.1,
         use_node_embeddings: bool = True,
+        graph_conv: str = 'gcn',
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.num_nodes = num_nodes
         self.use_node_embeddings = use_node_embeddings
+        self.graph_conv = graph_conv
 
         if ffn_dim is None:
             ffn_dim = hidden_dim * 2  # compact: 2× hidden, not the usual 4×
@@ -97,13 +100,17 @@ class SpatioTemporalTransformerEncoder(nn.Module):
         else:
             self.node_embed = None
 
-        # --- Spatial: GCN over all timesteps at once ---
-        # Pre-LN before GCN (consistent with existing encoder/decoder Pre-LN pattern)
+        # --- Spatial step (Pre-LN shared by both paths) ---
         self.gcn_norm = nn.LayerNorm(hidden_dim)
-        # Weight: (H, H); applied as x @ gcn_weight
-        self.gcn_weight = nn.Parameter(torch.empty(hidden_dim, hidden_dim))
-        self.gcn_bias = nn.Parameter(torch.zeros(hidden_dim))
-        nn.init.xavier_uniform_(self.gcn_weight)
+
+        if graph_conv == 'gat':
+            # GAT: reshape (B,T,N,H) → (B*T,N,H), apply GAT, reshape back
+            self.gat = GraphAttentionLayer(hidden_dim, hidden_dim, dropout=dropout)
+        else:
+            # GCN: vectorised over all T at once via raw weight matrix
+            self.gcn_weight = nn.Parameter(torch.empty(hidden_dim, hidden_dim))
+            self.gcn_bias = nn.Parameter(torch.zeros(hidden_dim))
+            nn.init.xavier_uniform_(self.gcn_weight)
 
         # --- Temporal: Transformer encoder ---
         self.pos_encoding = TemporalPositionalEncoding(hidden_dim, dropout=dropout)
@@ -144,19 +151,27 @@ class SpatioTemporalTransformerEncoder(nn.Module):
             emb = self.node_embed(node_ids)             # (N, H)
             x = x + emb.unsqueeze(0).unsqueeze(0)       # broadcast over B, T
 
-        # 3. GCN spatial aggregation (Pre-LN + residual)
+        # 3. Spatial aggregation (Pre-LN + residual)
         x_norm = self.gcn_norm(x)                                   # (B, T, N, H)
-        support = torch.matmul(x_norm, self.gcn_weight) + self.gcn_bias  # (B, T, N, H)
 
-        if adj.dim() == 2:
-            # Static (N, N): torch.matmul broadcasts over leading (B, T) dims
-            gcn_out = torch.matmul(adj, support)                    # (B, T, N, H)
+        if self.graph_conv == 'gat':
+            # GAT: reshape to (B*T, N, H), expand adj to (B*T, N, N), then reshape back
+            x_flat = x_norm.reshape(B * T, N, self.hidden_dim)
+            if adj.dim() == 2:
+                adj_flat = adj.unsqueeze(0).expand(B * T, -1, -1)
+            else:
+                adj_flat = adj.unsqueeze(1).expand(-1, T, -1, -1).reshape(B * T, N, N)
+            gcn_out = self.gat(x_flat, adj_flat).reshape(B, T, N, self.hidden_dim)
         else:
-            # Dynamic (B, N, N): expand over T then batched matmul
-            adj_t = adj.unsqueeze(1).expand(-1, T, -1, -1)          # (B, T, N, N)
-            gcn_out = torch.matmul(adj_t, support)                  # (B, T, N, H)
+            # GCN: vectorised over all T via batched matmul
+            support = torch.matmul(x_norm, self.gcn_weight) + self.gcn_bias  # (B, T, N, H)
+            if adj.dim() == 2:
+                gcn_out = torch.matmul(adj, support)                # (B, T, N, H)
+            else:
+                adj_t = adj.unsqueeze(1).expand(-1, T, -1, -1)
+                gcn_out = torch.matmul(adj_t, support)              # (B, T, N, H)
+            gcn_out = F.leaky_relu(gcn_out, negative_slope=0.1)
 
-        gcn_out = F.leaky_relu(gcn_out, negative_slope=0.1)
         x = x + gcn_out                                             # residual
 
         # 4. Temporal Transformer — share weights across nodes
@@ -279,6 +294,7 @@ class GraphTransformerModel(nn.Module):
         use_node_embeddings: bool = True,
         use_learnable_alpha_gate: bool = False,
         initial_wind_alpha: float = 0.6,
+        graph_conv: str = 'gcn',
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -305,6 +321,7 @@ class GraphTransformerModel(nn.Module):
             ffn_dim=ffn_dim,
             dropout=dropout,
             use_node_embeddings=use_node_embeddings,
+            graph_conv=graph_conv,
         )
 
         self.head = DirectHorizonHead(

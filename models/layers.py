@@ -73,18 +73,22 @@ class GraphLSTMCell(nn.Module):
     This captures both spatial dependencies (via GCN) and temporal dynamics (via LSTM).
     """
     
-    def __init__(self, input_dim, hidden_dim, num_nodes, bias=True):
+    def __init__(self, input_dim, hidden_dim, num_nodes, bias=True, graph_conv='gcn', dropout=0.1):
         super().__init__()
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.num_nodes = num_nodes
-        
-        # GCN for spatial feature extraction on input
-        self.gcn_i = GraphConvolution(input_dim, hidden_dim)
-        
-        # GCN for spatial feature extraction on hidden state
-        self.gcn_h = GraphConvolution(hidden_dim, hidden_dim)
-        
+
+        # Spatial feature extraction on input and hidden state
+        # graph_conv='gcn': original GraphConvolution (default, backward-compatible)
+        # graph_conv='gat': GraphAttentionLayer with wind-aware adjacency bias
+        if graph_conv == 'gat':
+            self.gcn_i = GraphAttentionLayer(input_dim, hidden_dim, dropout=dropout)
+            self.gcn_h = GraphAttentionLayer(hidden_dim, hidden_dim, dropout=dropout)
+        else:
+            self.gcn_i = GraphConvolution(input_dim, hidden_dim)
+            self.gcn_h = GraphConvolution(hidden_dim, hidden_dim)
+
         # LSTM gates: input, forget, cell, output
         # Combined linear transformation for efficiency
         self.gates = nn.Linear(hidden_dim * 2, hidden_dim * 4, bias=bias)
@@ -133,6 +137,124 @@ class GraphLSTMCell(nn.Module):
         h = torch.zeros(batch_size, self.num_nodes, self.hidden_dim, device=device)
         c = torch.zeros(batch_size, self.num_nodes, self.hidden_dim, device=device)
         return h, c
+
+
+class GraphAttentionLayer(nn.Module):
+    """
+    Multi-head Graph Attention Layer (GAT).
+
+    Replaces GraphConvolution in GraphLSTMCell when graph_conv='gat'.
+
+    Design:
+      - Standard GAT attention: e_ij = LeakyReLU(a^T [Wh_i || Wh_j])
+      - Wind-aware adjacency integrated as additive bias before softmax:
+            adj[i,j] > 0  →  +adj[i,j] (linear boost for wind-aligned edges)
+            adj[i,j] = 0  →  -1e9     (effectively masked out)
+        This preserves the spatial wind prior while letting the network learn
+        additional attention patterns on top.
+      - Multi-head with concatenation: output dim equals out_features unchanged.
+      - LeakyReLU(0.2) on raw scores — standard GAT activation.
+      - Dropout on attention weights.
+
+    Args:
+        in_features:  Input feature dimension
+        out_features: Output feature dimension (must be divisible by num_heads)
+        num_heads:    Attention heads. Auto-selected if None: prefer 4, then 2, then 1.
+        dropout:      Dropout probability applied to attention weights
+    """
+
+    def __init__(self, in_features: int, out_features: int, num_heads: int = None, dropout: float = 0.1):
+        super().__init__()
+
+        # Auto-select num_heads
+        if num_heads is None:
+            for h in [4, 2, 1]:
+                if out_features % h == 0:
+                    num_heads = h
+                    break
+
+        assert out_features % num_heads == 0, (
+            f"out_features ({out_features}) must be divisible by num_heads ({num_heads})"
+        )
+
+        self.in_features = in_features
+        self.out_features = out_features
+        self.num_heads = num_heads
+        self.head_dim = out_features // num_heads
+
+        # Shared linear projection: in_features → out_features (across all heads)
+        self.W = nn.Linear(in_features, out_features, bias=False)
+
+        # Attention vector per head: a_h ∈ R^(2*head_dim)
+        self.attn_vec = nn.Parameter(torch.empty(num_heads, 2 * self.head_dim))
+        nn.init.xavier_uniform_(self.attn_vec)
+
+        self.bias = nn.Parameter(torch.zeros(out_features))
+        self.leaky_relu = nn.LeakyReLU(negative_slope=0.2)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x:   (B, N, in_features)
+            adj: (N, N) static  or  (B, N, N) dynamic — wind-aware normalized adjacency
+        Returns:
+            out: (B, N, out_features)
+        """
+        assert x.dim() == 3, f"GAT expects (B, N, F), got {tuple(x.shape)}"
+        assert x.size(-1) == self.in_features, (
+            f"in_features mismatch: expected {self.in_features}, got {x.size(-1)}"
+        )
+
+        B, N, _ = x.shape
+        H, D = self.num_heads, self.head_dim
+
+        # 1. Linear transform → (B, N, H, D)
+        Wh = self.W(x).view(B, N, H, D)
+
+        # 2. Attention scores: e_ij = LeakyReLU(a^T [Wh_i || Wh_j])
+        # Expand for all (i, j) pairs: (B, N, N, H, 2D)
+        Wh_i = Wh.unsqueeze(2).expand(-1, -1, N, -1, -1)   # source i: (B, N, N, H, D)
+        Wh_j = Wh.unsqueeze(1).expand(-1, N, -1, -1, -1)   # target j: (B, N, N, H, D)
+        Wh_cat = torch.cat([Wh_i, Wh_j], dim=-1)            # (B, N, N, H, 2D)
+
+        # Dot with attention vector per head: (B, N, N, H)
+        attn_scores = (Wh_cat * self.attn_vec.view(1, 1, 1, H, -1)).sum(-1)
+        attn_scores = self.leaky_relu(attn_scores)
+
+        # 3. Wind-aware adjacency bias
+        if adj.dim() == 2:
+            adj_b = adj.unsqueeze(0)          # (1, N, N)
+        else:
+            adj_b = adj                        # (B, N, N)
+
+        # Boost connected edges by their adj weight; mask zero edges → -inf
+        adj_bias = torch.where(
+            adj_b > 1e-9,
+            adj_b,
+            adj_b.new_full(adj_b.shape, -1e9)
+        )                                      # (B or 1, N, N)
+        attn_scores = attn_scores + adj_bias.unsqueeze(-1)   # broadcast over heads
+
+        # 4. Softmax over source nodes (dim=2), then dropout
+        attn_weights = F.softmax(attn_scores, dim=2)         # (B, N, N, H)
+        attn_weights = self.dropout(attn_weights)
+
+        # 5. Weighted aggregation
+        # attn_weights: (B, N, N, H) → (B, H, N_dst, N_src)
+        # Wh:           (B, N, H, D) → (B, H, N_src, D)
+        attn_w = attn_weights.permute(0, 3, 1, 2)
+        Wh_p   = Wh.permute(0, 2, 1, 3)
+        out = torch.matmul(attn_w, Wh_p)      # (B, H, N, D)
+
+        # Concat heads → (B, N, out_features)
+        out = out.permute(0, 2, 1, 3).reshape(B, N, self.out_features)
+        out = out + self.bias
+
+        assert out.shape == (B, N, self.out_features), (
+            f"GAT output shape error: expected ({B}, {N}, {self.out_features}), got {tuple(out.shape)}"
+        )
+        return out
 
 
 class MultiHeadAttention(nn.Module):

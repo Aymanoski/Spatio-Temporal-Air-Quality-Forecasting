@@ -27,7 +27,8 @@ class GraphLSTMEncoder(nn.Module):
         num_nodes,
         num_layers=2,
         dropout=0.1,
-        use_node_embeddings=True
+        use_node_embeddings=True,
+        graph_conv='gcn',
     ):
         super().__init__()
         self.input_dim = input_dim
@@ -35,6 +36,7 @@ class GraphLSTMEncoder(nn.Module):
         self.num_nodes = num_nodes
         self.num_layers = num_layers
         self.use_node_embeddings = use_node_embeddings
+        self.graph_conv = graph_conv
         
         # Input projection
         self.input_proj = nn.Linear(input_dim, hidden_dim)
@@ -57,7 +59,9 @@ class GraphLSTMEncoder(nn.Module):
                 GraphLSTMCell(
                     input_dim=hidden_dim,
                     hidden_dim=hidden_dim,
-                    num_nodes=num_nodes
+                    num_nodes=num_nodes,
+                    graph_conv=graph_conv,
+                    dropout=dropout,
                 )
             )
         

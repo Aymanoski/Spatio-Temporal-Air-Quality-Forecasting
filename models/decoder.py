@@ -29,27 +29,28 @@ class GraphLSTMDecoder(nn.Module):
         num_nodes,
         num_layers=2,
         num_heads=4,
-        dropout=0.1
+        dropout=0.1,
+        graph_conv='gcn',
     ):
         super().__init__()
         self.output_dim = output_dim
         self.hidden_dim = hidden_dim
         self.num_nodes = num_nodes
         self.num_layers = num_layers
-        
+
         # Input projection (previous prediction -> hidden_dim)
         self.input_proj = nn.Linear(output_dim, hidden_dim)
-        
+
         # Multi-head attention for temporal context
         self.attention = MultiHeadAttention(
             hidden_dim=hidden_dim,
             num_heads=num_heads,
             dropout=dropout
         )
-        
+
         # Attention context projection
         self.context_proj = nn.Linear(hidden_dim * 2, hidden_dim)
-        
+
         # Stacked Graph LSTM layers
         self.layers = nn.ModuleList()
         for i in range(num_layers):
@@ -57,7 +58,9 @@ class GraphLSTMDecoder(nn.Module):
                 GraphLSTMCell(
                     input_dim=hidden_dim,
                     hidden_dim=hidden_dim,
-                    num_nodes=num_nodes
+                    num_nodes=num_nodes,
+                    graph_conv=graph_conv,
+                    dropout=dropout,
                 )
             )
         
@@ -211,8 +214,9 @@ class DirectMultiHorizonDecoder(nn.Module):
         num_layers=2,
         num_heads=4,
         dropout=0.1,
-        max_horizon=24,  # Maximum supported horizon for flexibility
-        use_attention=True
+        max_horizon=24,
+        use_attention=True,
+        graph_conv='gcn',
     ):
         super().__init__()
         self.output_dim = output_dim
@@ -224,21 +228,17 @@ class DirectMultiHorizonDecoder(nn.Module):
         self.use_attention = use_attention
 
         # Learnable step query embeddings: support up to max_horizon steps
-        # This allows flexible horizon at inference time
         self.step_queries = nn.Parameter(torch.empty(self.max_horizon, hidden_dim))
         nn.init.xavier_uniform_(self.step_queries)
 
         if use_attention:
-            # Multi-head attention over encoder outputs (shared across horizon steps)
             self.attention = MultiHeadAttention(
                 hidden_dim=hidden_dim,
                 num_heads=num_heads,
                 dropout=dropout
             )
-            # Project [query || context] -> hidden_dim
             self.context_proj = nn.Linear(hidden_dim * 2, hidden_dim)
         else:
-            # No attention: project query directly to hidden_dim
             self.context_proj = nn.Linear(hidden_dim, hidden_dim)
 
         # Shared Graph-LSTM layers applied independently per horizon step
@@ -246,7 +246,9 @@ class DirectMultiHorizonDecoder(nn.Module):
             GraphLSTMCell(
                 input_dim=hidden_dim,
                 hidden_dim=hidden_dim,
-                num_nodes=num_nodes
+                num_nodes=num_nodes,
+                graph_conv=graph_conv,
+                dropout=dropout,
             )
             for _ in range(num_layers)
         ])
