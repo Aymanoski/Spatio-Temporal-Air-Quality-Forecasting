@@ -42,7 +42,7 @@ division-by-near-zero instability.
 
 ## Core Architecture Reference (GCN-LSTM Models)
 
-All GCN-LSTM models (ranks 4–11) share the same codebase in `models/`. This section
+All GCN-LSTM models in this report share the same codebase in `models/`. This section
 documents the exact building blocks so each rank entry only needs to list what differs.
 
 ### GraphConvolution (`models/layers.py`)
@@ -235,8 +235,10 @@ training setup as identical to current defaults.
 | 7 | v2_direct_decoding_T4_best_MAE.pt | v2_direct_decoding | 22.4972 | 40.3729 | 46.3215% | 0.8093 |
 | 8 | v4_wind_adjacency_T4_MAE.pt | gcn_lstm_v2 | 22.3807 | 40.2931 | 47.7384% | 0.8100 |
 | 9 | alpha__best.pt | alpha | 21.8041 | 39.1870 | 46.0484% | 0.8203 |
-| 10 | alpha+embeding.pt | gcn_lstm_v2 | 21.6361 | 39.0500 | 45.9034% | 0.8216 |
-| 11 | gcn_lstm_v2_noattn_T4_best.pt | gcn_lstm_v2_noattn | 21.6356 | 39.0410 | 45.7963% | 0.8217 |
+| 10 | graph_transformer_v1_T4_best.pt | graph_transformer_v1 | 21.6859 | 39.0771 | 46.5207% | 0.8213 |
+| 11 | alpha+embeding.pt | gcn_lstm_v2 | 21.6361 | 39.0500 | 45.9034% | 0.8216 |
+| 12 | gcn_lstm_v2_noattn_T4_best.pt | gcn_lstm_v2_noattn | 21.6356 | 39.0410 | 45.7963% | 0.8217 |
+| 13 | graphtransformer_gat_v1_T4_best.pt | gcn_lstm_gat_v1 | 21.1839 | 38.0744 | 46.2076% | 0.8304 |
 
 ---
 
@@ -870,13 +872,75 @@ the data supports slightly more wind emphasis than the initial guess.
 
 ---
 
-## Rank 10: alpha+embeding.pt
+## Rank 10: graph_transformer_v1_T4_best.pt
+
+**Architecture Name**: `graph_transformer_v1`
+
+**Type**: `GraphTransformerModel` with GCN-based spatial block (`graph_conv='gcn'`).
+First transformer baseline in this report.
+
+**What this model changes vs GCN-LSTM**:
+- Replaces recurrent GraphLSTM temporal backbone with a compact Transformer encoder
+  over the 24-timestep window
+- Keeps dynamic wind-aware adjacency, learnable alpha gate, and node embeddings
+- Uses direct multi-horizon prediction head (no autoregression)
+
+**Architecture**:
+- `model_type`: `graph_transformer`
+- `graph_conv`: `gcn`
+- `hidden_dim`: 64, `num_tf_layers`: 2, `num_heads`: 4, `dropout`: 0.1
+- `use_wind_adjacency`: **True** (dynamic, row-normalized)
+- `use_learnable_alpha_gate`: **True** (final learned alpha ≈ 0.5037)
+- `use_node_embeddings`: **True**
+- `horizon`: 6
+- `loss_type`: `evt_hybrid`
+
+**Interpretation**: This transformer baseline is competitive with the best GCN-LSTM
+family (rank 11/12) and beats the earlier alpha-only run (rank 9), but does not beat
+the GAT-based transformer variant (rank 13).
+
+**Architecture Details**:
+- model_type: graph_transformer
+- graph_conv: gcn
+- num_tf_layers: 2
+- num_heads: 4
+- hidden_dim: 64
+- dropout: 0.1
+- horizon: 6
+- use_wind_adjacency: True
+- use_learnable_alpha_gate: True
+- use_node_embeddings: True
+- loss_type: evt_hybrid
+
+**Overall Metrics**:
+- RMSE: 39.0771
+- MAE: 21.6859
+- MAPE: 46.5207%
+- R²: 0.8213
+- Epoch: 24
+- Val Loss: 0.002405
+- Val MAE: 19.8511
+
+**Per-Horizon Metrics**:
+
+| Horizon | RMSE | MAE | MAPE |
+|---:|---:|---:|---:|
+| 1 | 22.5163 | 13.1817 | 25.0874% |
+| 2 | 29.9351 | 16.8303 | 32.0158% |
+| 3 | 36.2802 | 20.3591 | 40.7265% |
+| 4 | 41.6933 | 23.6172 | 50.6043% |
+| 5 | 46.3791 | 26.6512 | 60.3885% |
+| 6 | 50.5312 | 29.4757 | 70.3018% |
+
+---
+
+## Rank 11: alpha+embeding.pt
 
 **Architecture Name**: `gcn_lstm_v2`
 
 **Type**: `GCNLSTMModel`. Adds learnable node identity embeddings on top of alpha.
 **Confirmed improvement**: Δ val MAE −0.107 vs alpha-only (19.471 vs 19.578).
-**Current best checkpoint** — baseline to beat before GAT.
+**Best GCN-LSTM checkpoint** in this report.
 
 **Architecture**:
 - `input_dim`: 33, `hidden_dim`: 64, `output_dim`: 1
@@ -952,12 +1016,12 @@ each station, allowing the model to learn station-specific biases and adjustment
 
 ---
 
-## Rank 11: gcn_lstm_v2_noattn_T4_best.pt
+## Rank 12: gcn_lstm_v2_noattn_T4_best.pt
 
 **Architecture Name**: `gcn_lstm_v2_noattn`
 
 **Type**: `GCNLSTMModel`. **Final current baseline** for the GCN-LSTM phase.
-Identical to rank 10 except `use_attention=False`. Confirmed that attention adds zero
+Identical to rank 11 except `use_attention=False`. Confirmed that attention adds zero
 value (val MAE difference: 0.009, test MAE difference: 0.0005 — measurement noise).
 
 **Architecture**:
@@ -1048,3 +1112,64 @@ The full confirmed feature stack: direct decoding + dynamic wind adj + learnable
 | 4 | 41.7076 | 23.6304 | 49.2169% |
 | 5 | 46.2781 | 26.7865 | 59.0332% |
 | 6 | 50.4944 | 29.5857 | 68.5005% |
+
+---
+
+## Rank 13: graphtransformer_gat_v1_T4_best.pt
+
+**Architecture Name**: `gcn_lstm_gat_v1`
+
+**Type**: `GraphTransformerModel` with GAT-based spatial block (`graph_conv='gat'`).
+Best-performing model in this report.
+
+**What this model changes vs rank 10 transformer**:
+- Keeps the same transformer temporal stack (2 layers, 4 heads, hidden_dim=64)
+- Replaces GCN spatial aggregation with graph attention (`GraphAttentionLayer`)
+- Keeps dynamic wind-aware adjacency, learnable alpha gate, node embeddings, and EVT loss
+
+**Architecture**:
+- `model_type`: `graph_transformer`
+- `graph_conv`: `gat`
+- `hidden_dim`: 64, `num_tf_layers`: 2, `num_heads`: 4, `dropout`: 0.1
+- `use_wind_adjacency`: **True** (dynamic, row-normalized)
+- `use_learnable_alpha_gate`: **True** (final learned alpha ≈ 0.5036)
+- `use_node_embeddings`: **True**
+- `horizon`: 6
+- `loss_type`: `evt_hybrid`
+
+**Interpretation**: This is the strongest model currently evaluated, improving over
+both GCN-LSTM and GCN-transformer variants, with the largest gains visible at medium/long
+horizons while keeping H1 strong.
+
+**Architecture Details**:
+- model_type: graph_transformer
+- graph_conv: gat
+- num_tf_layers: 2
+- num_heads: 4
+- hidden_dim: 64
+- dropout: 0.1
+- horizon: 6
+- use_wind_adjacency: True
+- use_learnable_alpha_gate: True
+- use_node_embeddings: True
+- loss_type: evt_hybrid
+
+**Overall Metrics**:
+- RMSE: 38.0744
+- MAE: 21.1839
+- MAPE: 46.2076%
+- R²: 0.8304
+- Epoch: 34
+- Val Loss: 0.002258
+- Val MAE: 19.3338
+
+**Per-Horizon Metrics**:
+
+| Horizon | RMSE | MAE | MAPE |
+|---:|---:|---:|---:|
+| 1 | 22.0347 | 12.9692 | 27.4953% |
+| 2 | 29.4484 | 16.6268 | 33.9246% |
+| 3 | 35.4058 | 19.9839 | 41.3541% |
+| 4 | 40.5408 | 23.0332 | 49.6911% |
+| 5 | 45.0588 | 25.8932 | 57.9314% |
+| 6 | 49.1713 | 28.5973 | 66.8492% |

@@ -80,6 +80,7 @@ class SpatioTemporalTransformerEncoder(nn.Module):
         dropout: float = 0.1,
         use_node_embeddings: bool = True,
         graph_conv: str = 'gcn',
+        num_gat_layers: int = 1,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -100,14 +101,20 @@ class SpatioTemporalTransformerEncoder(nn.Module):
         else:
             self.node_embed = None
 
-        # --- Spatial step (Pre-LN shared by both paths) ---
-        self.gcn_norm = nn.LayerNorm(hidden_dim)
-
+        # --- Spatial layers ---
         if graph_conv == 'gat':
-            # GAT: reshape (B,T,N,H) → (B*T,N,H), apply GAT, reshape back
-            self.gat = GraphAttentionLayer(hidden_dim, hidden_dim, dropout=dropout)
+            # Stack of GAT layers, each with its own Pre-LN and residual.
+            # Layer k aggregates k-hop neighbourhood information.
+            self.gat_layers = nn.ModuleList([
+                GraphAttentionLayer(hidden_dim, hidden_dim, dropout=dropout)
+                for _ in range(num_gat_layers)
+            ])
+            self.gat_norms = nn.ModuleList([
+                nn.LayerNorm(hidden_dim) for _ in range(num_gat_layers)
+            ])
         else:
-            # GCN: vectorised over all T at once via raw weight matrix
+            # GCN: single layer, vectorised over all T at once via raw weight matrix
+            self.gcn_norm = nn.LayerNorm(hidden_dim)
             self.gcn_weight = nn.Parameter(torch.empty(hidden_dim, hidden_dim))
             self.gcn_bias = nn.Parameter(torch.zeros(hidden_dim))
             nn.init.xavier_uniform_(self.gcn_weight)
@@ -151,28 +158,31 @@ class SpatioTemporalTransformerEncoder(nn.Module):
             emb = self.node_embed(node_ids)             # (N, H)
             x = x + emb.unsqueeze(0).unsqueeze(0)       # broadcast over B, T
 
-        # 3. Spatial aggregation (Pre-LN + residual)
-        x_norm = self.gcn_norm(x)                                   # (B, T, N, H)
-
+        # 3. Spatial aggregation (stacked GAT or single GCN, Pre-LN + residual per layer)
         if self.graph_conv == 'gat':
-            # GAT: reshape to (B*T, N, H), expand adj to (B*T, N, N), then reshape back
-            x_flat = x_norm.reshape(B * T, N, self.hidden_dim)
+            # Expand adj once for all T — same graph used at every timestep.
+            # (N,N) or (B,N,N) → (B*T, N, N)
             if adj.dim() == 2:
                 adj_flat = adj.unsqueeze(0).expand(B * T, -1, -1)
             else:
                 adj_flat = adj.unsqueeze(1).expand(-1, T, -1, -1).reshape(B * T, N, N)
-            gcn_out = self.gat(x_flat, adj_flat).reshape(B, T, N, self.hidden_dim)
+
+            for gat_layer, gat_norm in zip(self.gat_layers, self.gat_norms):
+                x_norm = gat_norm(x)                                         # (B, T, N, H)
+                x_flat = x_norm.reshape(B * T, N, self.hidden_dim)
+                gat_out = gat_layer(x_flat, adj_flat).reshape(B, T, N, self.hidden_dim)
+                x = x + gat_out                                              # residual
         else:
-            # GCN: vectorised over all T via batched matmul
+            # GCN: single layer, vectorised over all T via batched matmul
+            x_norm = self.gcn_norm(x)                                        # (B, T, N, H)
             support = torch.matmul(x_norm, self.gcn_weight) + self.gcn_bias  # (B, T, N, H)
             if adj.dim() == 2:
-                gcn_out = torch.matmul(adj, support)                # (B, T, N, H)
+                gcn_out = torch.matmul(adj, support)                         # (B, T, N, H)
             else:
                 adj_t = adj.unsqueeze(1).expand(-1, T, -1, -1)
-                gcn_out = torch.matmul(adj_t, support)              # (B, T, N, H)
+                gcn_out = torch.matmul(adj_t, support)                       # (B, T, N, H)
             gcn_out = F.leaky_relu(gcn_out, negative_slope=0.1)
-
-        x = x + gcn_out                                             # residual
+            x = x + gcn_out                                                  # residual
 
         # 4. Temporal Transformer — share weights across nodes
         # (B, T, N, H) → permute → (B, N, T, H) → reshape → (B*N, T, H)
@@ -295,6 +305,7 @@ class GraphTransformerModel(nn.Module):
         use_learnable_alpha_gate: bool = False,
         initial_wind_alpha: float = 0.6,
         graph_conv: str = 'gcn',
+        num_gat_layers: int = 1,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -322,6 +333,7 @@ class GraphTransformerModel(nn.Module):
             dropout=dropout,
             use_node_embeddings=use_node_embeddings,
             graph_conv=graph_conv,
+            num_gat_layers=num_gat_layers,
         )
 
         self.head = DirectHorizonHead(

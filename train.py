@@ -45,13 +45,14 @@ CONFIG = {
     # Model type switch
     # 'gcn_lstm'         — original GraphLSTM encoder-decoder (recurrent baseline)
     # 'graph_transformer'— GCN per-timestep + Transformer encoder + direct head (new)
-    'model_type': 'gcn_lstm',
+    'model_type': 'graph_transformer',
     'num_tf_layers': 2,  # Transformer encoder layers (graph_transformer only)
 
     # Graph convolution type ('gcn' | 'gat')
     # 'gcn' — original GraphConvolution with normalized adjacency (default, backward-compatible)
     # 'gat' — GraphAttentionLayer: learned attention + wind-aware adjacency as additive bias
     'graph_conv': 'gat',
+    'num_gat_layers': 1,   # Number of stacked GAT layers (1=1-hop, 2=2-hop neighbourhood)
 
     # Training
     'batch_size': 32,
@@ -111,7 +112,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'gcn_lstm_gat_v1',  # GCN-LSTM + GAT spatial: ablation against gcn_lstm_v2
+    'architecture_name': 'graph_transformer_gat_v2',  # GraphTransformer + 2-layer GAT spatial
     'hardware_tag': 'T4',       # Options: 'integrated_gpu', 'T4', 'rtx3090', etc.
     'use_versioned_checkpoint': True,       # If True, saves as <arch>_<hardware>_best.pt
 
@@ -774,8 +775,9 @@ def train(config, trial=None):
             use_learnable_alpha_gate=config.get('use_learnable_alpha_gate', False),
             initial_wind_alpha=config.get('wind_alpha', 0.6),
             graph_conv=config.get('graph_conv', 'gcn'),
+            num_gat_layers=config.get('num_gat_layers', 1),
         ).to(device)
-        print(f"  Model type: GraphTransformerModel  graph_conv={config.get('graph_conv', 'gcn')}")
+        print(f"  Model type: GraphTransformerModel  graph_conv={config.get('graph_conv', 'gcn')}  num_gat_layers={config.get('num_gat_layers', 1)}")
     else:
         model = GCNLSTMModel(
             input_dim=config['input_dim'],
