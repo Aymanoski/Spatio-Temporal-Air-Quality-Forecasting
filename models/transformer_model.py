@@ -81,6 +81,7 @@ class SpatioTemporalTransformerEncoder(nn.Module):
         use_node_embeddings: bool = True,
         graph_conv: str = 'gcn',
         num_gat_layers: int = 1,
+        gat_version: str = 'v1',
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -106,7 +107,7 @@ class SpatioTemporalTransformerEncoder(nn.Module):
             # Stack of GAT layers, each with its own Pre-LN and residual.
             # Layer k aggregates k-hop neighbourhood information.
             self.gat_layers = nn.ModuleList([
-                GraphAttentionLayer(hidden_dim, hidden_dim, dropout=dropout)
+                GraphAttentionLayer(hidden_dim, hidden_dim, dropout=dropout, version=gat_version)
                 for _ in range(num_gat_layers)
             ])
             self.gat_norms = nn.ModuleList([
@@ -306,6 +307,7 @@ class GraphTransformerModel(nn.Module):
         initial_wind_alpha: float = 0.6,
         graph_conv: str = 'gcn',
         num_gat_layers: int = 1,
+        gat_version: str = 'v1',
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -334,6 +336,7 @@ class GraphTransformerModel(nn.Module):
             use_node_embeddings=use_node_embeddings,
             graph_conv=graph_conv,
             num_gat_layers=num_gat_layers,
+            gat_version=gat_version,
         )
 
         self.head = DirectHorizonHead(

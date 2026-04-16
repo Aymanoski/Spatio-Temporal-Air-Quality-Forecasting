@@ -141,19 +141,25 @@ class GraphLSTMCell(nn.Module):
 
 class GraphAttentionLayer(nn.Module):
     """
-    Multi-head Graph Attention Layer (GAT).
+    Multi-head Graph Attention Layer — supports GATv1 and GATv2.
 
-    Replaces GraphConvolution in GraphLSTMCell when graph_conv='gat'.
+    version='v1'  (standard GAT):
+        e_ij = LeakyReLU(a^T [W h_i || W h_j])
+        Attention is "static": LeakyReLU is applied after the dot product with a,
+        making the score decomposable into independent source and target terms.
 
-    Design:
-      - Standard GAT attention: e_ij = LeakyReLU(a^T [Wh_i || Wh_j])
-      - Wind-aware adjacency integrated as additive bias before softmax:
-            adj[i,j] > 0  →  +adj[i,j] (linear boost for wind-aligned edges)
-            adj[i,j] = 0  →  -1e9     (effectively masked out)
-        This preserves the spatial wind prior while letting the network learn
-        additional attention patterns on top.
-      - Multi-head with concatenation: output dim equals out_features unchanged.
-      - LeakyReLU(0.2) on raw scores — standard GAT activation.
+    version='v2'  (GATv2, Brody et al. 2022):
+        e_ij = a^T LeakyReLU(W_src h_i + W_dst h_j)
+        Attention is "dynamic": LeakyReLU is applied before the dot product,
+        breaking the decomposability and allowing neighbour rankings to depend
+        on the query node. More expressive than v1 at the same depth.
+
+    Both versions share:
+      - Wind-aware adjacency as additive bias before softmax:
+            adj[i,j] > 0  →  +adj[i,j] (boost wind-aligned edges)
+            adj[i,j] = 0  →  -1e9      (hard mask)
+      - Multi-head with head concatenation.
+      - LeakyReLU(0.2).
       - Dropout on attention weights.
 
     Args:
@@ -161,9 +167,17 @@ class GraphAttentionLayer(nn.Module):
         out_features: Output feature dimension (must be divisible by num_heads)
         num_heads:    Attention heads. Auto-selected if None: prefer 4, then 2, then 1.
         dropout:      Dropout probability applied to attention weights
+        version:      'v1' (standard GAT) or 'v2' (GATv2)
     """
 
-    def __init__(self, in_features: int, out_features: int, num_heads: int = None, dropout: float = 0.1):
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        num_heads: int = None,
+        dropout: float = 0.1,
+        version: str = 'v1',
+    ):
         super().__init__()
 
         # Auto-select num_heads
@@ -176,17 +190,27 @@ class GraphAttentionLayer(nn.Module):
         assert out_features % num_heads == 0, (
             f"out_features ({out_features}) must be divisible by num_heads ({num_heads})"
         )
+        assert version in ('v1', 'v2'), f"version must be 'v1' or 'v2', got '{version}'"
 
         self.in_features = in_features
         self.out_features = out_features
         self.num_heads = num_heads
         self.head_dim = out_features // num_heads
+        self.version = version
 
-        # Shared linear projection: in_features → out_features (across all heads)
-        self.W = nn.Linear(in_features, out_features, bias=False)
+        if version == 'v2':
+            # Two separate projections: source and target nodes projected independently,
+            # then summed before the nonlinearity.
+            self.W_src = nn.Linear(in_features, out_features, bias=False)
+            self.W_dst = nn.Linear(in_features, out_features, bias=False)
+            # Attention vector per head: a_h ∈ R^(head_dim)  [applied after LeakyReLU]
+            self.attn_vec = nn.Parameter(torch.empty(num_heads, self.head_dim))
+        else:
+            # Shared projection for both source and target nodes.
+            self.W = nn.Linear(in_features, out_features, bias=False)
+            # Attention vector per head: a_h ∈ R^(2*head_dim)
+            self.attn_vec = nn.Parameter(torch.empty(num_heads, 2 * self.head_dim))
 
-        # Attention vector per head: a_h ∈ R^(2*head_dim)
-        self.attn_vec = nn.Parameter(torch.empty(num_heads, 2 * self.head_dim))
         nn.init.xavier_uniform_(self.attn_vec)
 
         self.bias = nn.Parameter(torch.zeros(out_features))
@@ -209,45 +233,56 @@ class GraphAttentionLayer(nn.Module):
         B, N, _ = x.shape
         H, D = self.num_heads, self.head_dim
 
-        # 1. Linear transform → (B, N, H, D)
-        Wh = self.W(x).view(B, N, H, D)
+        if self.version == 'v2':
+            # GATv2: e_ij = a^T LeakyReLU(W_src h_i + W_dst h_j)
+            Wh_src = self.W_src(x).view(B, N, H, D)   # (B, N, H, D)
+            Wh_dst = self.W_dst(x).view(B, N, H, D)   # (B, N, H, D)
 
-        # 2. Attention scores: e_ij = LeakyReLU(a^T [Wh_i || Wh_j])
-        # Expand for all (i, j) pairs: (B, N, N, H, 2D)
-        Wh_i = Wh.unsqueeze(2).expand(-1, -1, N, -1, -1)   # source i: (B, N, N, H, D)
-        Wh_j = Wh.unsqueeze(1).expand(-1, N, -1, -1, -1)   # target j: (B, N, N, H, D)
-        Wh_cat = torch.cat([Wh_i, Wh_j], dim=-1)            # (B, N, N, H, 2D)
+            # Expand and add for all (i, j) pairs
+            src_i = Wh_src.unsqueeze(2).expand(-1, -1, N, -1, -1)  # (B, N, N, H, D)
+            dst_j = Wh_dst.unsqueeze(1).expand(-1, N, -1, -1, -1)  # (B, N, N, H, D)
 
-        # Dot with attention vector per head: (B, N, N, H)
-        attn_scores = (Wh_cat * self.attn_vec.view(1, 1, 1, H, -1)).sum(-1)
-        attn_scores = self.leaky_relu(attn_scores)
+            # Nonlinearity before dot product — this is what makes v2 "dynamic"
+            e = self.leaky_relu(src_i + dst_j)                      # (B, N, N, H, D)
+            attn_scores = (e * self.attn_vec.view(1, 1, 1, H, D)).sum(-1)  # (B, N, N, H)
 
-        # 3. Wind-aware adjacency bias
-        if adj.dim() == 2:
-            adj_b = adj.unsqueeze(0)          # (1, N, N)
+            # Values for aggregation: reuse W_dst projections
+            Wh_val = Wh_dst
         else:
-            adj_b = adj                        # (B, N, N)
+            # Standard GATv1: e_ij = LeakyReLU(a^T [W h_i || W h_j])
+            Wh = self.W(x).view(B, N, H, D)
 
-        # Boost connected edges by their adj weight; mask zero edges → -inf
+            Wh_i = Wh.unsqueeze(2).expand(-1, -1, N, -1, -1)   # (B, N, N, H, D)
+            Wh_j = Wh.unsqueeze(1).expand(-1, N, -1, -1, -1)   # (B, N, N, H, D)
+            Wh_cat = torch.cat([Wh_i, Wh_j], dim=-1)            # (B, N, N, H, 2D)
+
+            attn_scores = (Wh_cat * self.attn_vec.view(1, 1, 1, H, -1)).sum(-1)
+            attn_scores = self.leaky_relu(attn_scores)           # (B, N, N, H)
+
+            Wh_val = Wh
+
+        # Wind-aware adjacency bias (shared between v1 and v2)
+        if adj.dim() == 2:
+            adj_b = adj.unsqueeze(0)
+        else:
+            adj_b = adj
+
         adj_bias = torch.where(
             adj_b > 1e-9,
             adj_b,
             adj_b.new_full(adj_b.shape, -1e9)
-        )                                      # (B or 1, N, N)
-        attn_scores = attn_scores + adj_bias.unsqueeze(-1)   # broadcast over heads
+        )
+        attn_scores = attn_scores + adj_bias.unsqueeze(-1)
 
-        # 4. Softmax over source nodes (dim=2), then dropout
-        attn_weights = F.softmax(attn_scores, dim=2)         # (B, N, N, H)
+        # Softmax over source nodes, dropout
+        attn_weights = F.softmax(attn_scores, dim=2)   # (B, N, N, H)
         attn_weights = self.dropout(attn_weights)
 
-        # 5. Weighted aggregation
-        # attn_weights: (B, N, N, H) → (B, H, N_dst, N_src)
-        # Wh:           (B, N, H, D) → (B, H, N_src, D)
-        attn_w = attn_weights.permute(0, 3, 1, 2)
-        Wh_p   = Wh.permute(0, 2, 1, 3)
-        out = torch.matmul(attn_w, Wh_p)      # (B, H, N, D)
+        # Weighted aggregation
+        attn_w = attn_weights.permute(0, 3, 1, 2)     # (B, H, N_dst, N_src)
+        Wh_p   = Wh_val.permute(0, 2, 1, 3)           # (B, H, N_src, D)
+        out = torch.matmul(attn_w, Wh_p)              # (B, H, N, D)
 
-        # Concat heads → (B, N, out_features)
         out = out.permute(0, 2, 1, 3).reshape(B, N, self.out_features)
         out = out + self.bias
 

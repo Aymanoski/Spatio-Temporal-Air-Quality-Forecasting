@@ -4,7 +4,7 @@ import os
 from sklearn.preprocessing import MinMaxScaler
 import joblib
 
-RAW_PATH = "data/raw/"
+RAW_PATH = "data/raw/beijing/"
 PROCESSED_PATH = "data/processed/"
 
 # Station order must match adjacency matrix order

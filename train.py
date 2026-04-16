@@ -53,6 +53,15 @@ CONFIG = {
     # 'gat' — GraphAttentionLayer: learned attention + wind-aware adjacency as additive bias
     'graph_conv': 'gat',
     'num_gat_layers': 1,   # Number of stacked GAT layers (1=1-hop, 2=2-hop neighbourhood)
+    'gat_version': 'v1',  # 'v1' = standard GAT, 'v2' = GATv2 (dynamic attention)
+
+    # Residual prediction: model outputs delta from last-observed PM2.5 (persistence baseline).
+    # final_prediction = model_output + last_observed_PM2.5
+    # Forces model to learn corrections to a sensible prior instead of absolute values.
+    # Particularly helps longer horizons where absolute prediction is harder.
+    # PM2.5 feature index in X must match config['target_feature_idx'].
+    'use_persistence_residual': True,
+    'target_feature_idx': 0,  # Index of PM2.5 in the feature dimension of X
 
     # Training
     'batch_size': 32,
@@ -87,7 +96,7 @@ CONFIG = {
     # Wind-aware adjacency
     'use_wind_adjacency': True,    # Use dynamic wind-aware adjacency
     'wind_alpha': 0.6,             # Wind influence weight (0=distance-only, 1=wind-only)
-    'use_learnable_alpha_gate': False,  # Learn alpha instead of keeping wind_alpha fixed
+    'use_learnable_alpha_gate': True,  # Learn alpha instead of keeping wind_alpha fixed
     'use_node_embeddings': True,        # Learnable per-station identity embeddings (post-LN injection)
     'distance_sigma': 1800,        # Distance decay parameter (calibrated for Beijing ~35km mean)
     'wind_aggregation_mode': 'recent_weighted',  # 'recent_weighted' | 'last' | 'mean'
@@ -112,7 +121,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v2',  # GraphTransformer + 2-layer GAT spatial
+    'architecture_name': 'graph_transformer_gat_v1_residual',  # GraphTransformer + GATv1 + persistence residual
     'hardware_tag': 'T4',       # Options: 'integrated_gpu', 'T4', 'rtx3090', etc.
     'use_versioned_checkpoint': True,       # If True, saves as <arch>_<hardware>_best.pt
 
@@ -537,11 +546,20 @@ def train_epoch(model, train_loader, optimizer, criterion, adj, config, teacher_
             horizon=config['horizon'],
             teacher_forcing_ratio=teacher_forcing_ratio
         )
-        
+
         # predictions: (batch, horizon, num_nodes, 1)
         # Y_batch: (batch, horizon, num_nodes)
         predictions = predictions.squeeze(-1)
-        
+
+        # Persistence residual: model outputs delta from last observed PM2.5.
+        # Add the baseline so loss is computed on final predictions vs actual targets.
+        if config.get('use_persistence_residual', False):
+            feat_idx = config.get('target_feature_idx', 0)
+            # last observed PM2.5 (scaled): (B, N)
+            y_last = X_batch[:, -1, :, feat_idx]
+            # expand to (B, horizon, N) and add to model delta output
+            predictions = predictions + y_last.unsqueeze(1).expand_as(predictions)
+
         # Compute loss
         loss = criterion(predictions, Y_batch)
         
@@ -598,6 +616,13 @@ def validate(model, val_loader, criterion, adj, config, target_scaler=None):
             )
 
             predictions = predictions.squeeze(-1)
+
+            # Persistence residual: add last observed PM2.5 to model delta output
+            if config.get('use_persistence_residual', False):
+                feat_idx = config.get('target_feature_idx', 0)
+                y_last = X_batch[:, -1, :, feat_idx]
+                predictions = predictions + y_last.unsqueeze(1).expand_as(predictions)
+
             loss = criterion(predictions, Y_batch)
             total_loss += loss.item()
 
@@ -628,6 +653,9 @@ def compute_metrics(model, test_loader, adj, config, target_scaler=None):
     all_preds = []
     all_targets = []
 
+    use_residual = config.get('use_persistence_residual', False)
+    feat_idx = config.get('target_feature_idx', 0)
+
     with torch.no_grad():
         for X_batch, Y_batch in test_loader:
             X_batch = X_batch.to(device)
@@ -640,6 +668,11 @@ def compute_metrics(model, test_loader, adj, config, target_scaler=None):
                 adj_batch = adj
 
             predictions = model.predict(X_batch, adj_batch, horizon=config['horizon'])
+
+            # Persistence residual: add last observed PM2.5 to model delta output
+            if use_residual:
+                y_last = X_batch[:, -1, :, feat_idx]                   # (B, N)
+                predictions = predictions + y_last.unsqueeze(1).expand_as(predictions)
 
             all_preds.append(predictions.cpu().numpy())
             all_targets.append(Y_batch.numpy())
@@ -776,8 +809,9 @@ def train(config, trial=None):
             initial_wind_alpha=config.get('wind_alpha', 0.6),
             graph_conv=config.get('graph_conv', 'gcn'),
             num_gat_layers=config.get('num_gat_layers', 1),
+            gat_version=config.get('gat_version', 'v1'),
         ).to(device)
-        print(f"  Model type: GraphTransformerModel  graph_conv={config.get('graph_conv', 'gcn')}  num_gat_layers={config.get('num_gat_layers', 1)}")
+        print(f"  Model type: GraphTransformerModel  graph_conv={config.get('graph_conv', 'gcn')}  gat_version={config.get('gat_version', 'v1')}  num_gat_layers={config.get('num_gat_layers', 1)}")
     else:
         model = GCNLSTMModel(
             input_dim=config['input_dim'],
