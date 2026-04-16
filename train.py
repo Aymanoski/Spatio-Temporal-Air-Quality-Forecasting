@@ -28,7 +28,7 @@ from utils.graph import (
 CONFIG = {
     # Data
     'data_path': 'data/processed/',
-    'input_len': 48,        # Lookback window (hours)
+    'input_len': 24,        # Lookback window (hours)
     'horizon': 6,           # Prediction horizon (hours)
     
     # Model architecture
@@ -81,7 +81,7 @@ CONFIG = {
     'evt_threshold_mode': 'global',      # Populated from training targets
 
     # EVT Improvements: DISABLED (fixed λ=0.05 validation)
-    'evt_asymmetric_penalty': False,        # Disabled for baseline comparison
+    'evt_asymmetric_penalty': True,        # Disabled for baseline comparison
     'evt_under_penalty_multiplier': 2.0,    # Not used when asymmetric_penalty=False
     'evt_use_lambda_schedule': False,       # Disabled - using fixed λ=0.05
     'evt_lambda_schedule': {
