@@ -54,7 +54,14 @@ CONFIG = {
     'graph_conv': 'gat',
     'num_gat_layers': 1,   # Number of stacked GAT layers (1=1-hop, 2=2-hop neighbourhood)
     'gat_version': 'v1',  # 'v1' = standard GAT, 'v2' = GATv2 (dynamic attention)
-    'use_post_temporal_gat': True,  # Post-temporal spatial GAT: aggregate neighbours' 24h summaries after Transformer
+    'use_post_temporal_gat': False,  # Post-temporal GAT: FAILED (Test MAE 21.022, destabilized training)
+
+    # Horizon-conditioned temporal attention head.
+    # Replaces last-token pooling with per-horizon soft attention over all T timesteps.
+    # Hypothesis: H4-H6 degradation is caused by collapsing T=24 → 1 vector.
+    # Each horizon h learns which timesteps to attend to (trend, slope, periodicity).
+    # Compare against DirectHorizonHead baseline: Val 18.834 / Test 20.624 / RMSE 37.729.
+    'use_temporal_attention_head': True,
 
     # Residual prediction: model outputs delta from last-observed PM2.5 (persistence baseline).
     # final_prediction = model_output + last_observed_PM2.5
@@ -122,7 +129,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_postgat',  # GraphTransformer + GATv1 + persistence residual + post-temporal GAT
+    'architecture_name': 'graph_transformer_gat_v1_residual_temporalpool',  # GraphTransformer + GATv1 + persistence residual + horizon-conditioned temporal attention head
     'hardware_tag': 'T4',       # Options: 'integrated_gpu', 'T4', 'rtx3090', etc.
     'use_versioned_checkpoint': True,       # If True, saves as <arch>_<hardware>_best.pt
 
@@ -831,8 +838,9 @@ def train(config, trial=None):
             num_gat_layers=config.get('num_gat_layers', 1),
             gat_version=config.get('gat_version', 'v1'),
             use_post_temporal_gat=config.get('use_post_temporal_gat', False),
+            use_temporal_attention_head=config.get('use_temporal_attention_head', False),
         ).to(device)
-        print(f"  Model type: GraphTransformerModel  graph_conv={config.get('graph_conv', 'gcn')}  gat_version={config.get('gat_version', 'v1')}  num_gat_layers={config.get('num_gat_layers', 1)}  post_gat={config.get('use_post_temporal_gat', False)}")
+        print(f"  Model type: GraphTransformerModel  graph_conv={config.get('graph_conv', 'gcn')}  gat_version={config.get('gat_version', 'v1')}  num_gat_layers={config.get('num_gat_layers', 1)}  post_gat={config.get('use_post_temporal_gat', False)}  temporal_attn_head={config.get('use_temporal_attention_head', False)}")
     else:
         model = GCNLSTMModel(
             input_dim=config['input_dim'],

@@ -11,13 +11,14 @@ Architecture:
     → reshape (B, T, N, H) → (B*N, T, H)
     → sinusoidal positional encoding over T
     → small Transformer encoder (2 layers, Pre-LN, shared weights across nodes)
-    → last timestep token → (B, N, H)
-    → post-temporal spatial GAT:
-        Pre-LN → GraphAttentionLayer(H→H) → residual
-        Each node aggregates its neighbours' 24h temporal summaries
-        Uses the same wind-aware adjacency as the pre-temporal GAT
-    → direct multi-horizon head:
-        for each step t: final_h + learned step_query[t] → 2-layer MLP → scalar
+    → either:
+        (a) last timestep token → (B, N, H)
+            → optional post-temporal spatial GAT (Pre-LN + GAT + residual)
+            → direct multi-horizon head:
+               for each step t: final_h + learned step_query[t] → 2-layer MLP → scalar
+        (b) full sequence → (B, N, T, H)   [use_temporal_attention_head=True]
+            → horizon-conditioned temporal attention head:
+               for each horizon h: softmax attention over T → pooled context_h → MLP → scalar
     → output (B, horizon, N, output_dim)
 
 Design rationale:
@@ -86,12 +87,14 @@ class SpatioTemporalTransformerEncoder(nn.Module):
         graph_conv: str = 'gcn',
         num_gat_layers: int = 1,
         gat_version: str = 'v1',
+        return_full_sequence: bool = False,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.num_nodes = num_nodes
         self.use_node_embeddings = use_node_embeddings
         self.graph_conv = graph_conv
+        self.return_full_sequence = return_full_sequence
 
         if ffn_dim is None:
             ffn_dim = hidden_dim * 2  # compact: 2× hidden, not the usual 4×
@@ -150,7 +153,8 @@ class SpatioTemporalTransformerEncoder(nn.Module):
             x:   (B, T, N, F)
             adj: (N, N) static  or  (B, N, N) dynamic
         Returns:
-            (B, N, H) — summary representation after seeing the full T-step window
+            return_full_sequence=False: (B, N, H) — last-token summary per node
+            return_full_sequence=True:  (B, N, T, H) — full temporal sequence per node
         """
         B, T, N, _ = x.shape
 
@@ -197,6 +201,11 @@ class SpatioTemporalTransformerEncoder(nn.Module):
 
         # Full bidirectional attention: no causal mask needed (we have the full history)
         x = self.transformer(x)    # (B*N, T, H)
+
+        if self.return_full_sequence:
+            # Return all T token representations for attention-based heads.
+            # Shape: (B, N, T, H)
+            return x.reshape(B, N, T, self.hidden_dim)
 
         # Last timestep: represents the model state after seeing the full 24h window.
         # Forecasting-natural — analogous to an LSTM's final hidden state.
@@ -277,6 +286,100 @@ class DirectHorizonHead(nn.Module):
         return out
 
 
+class HorizonAttentionHead(nn.Module):
+    """
+    Horizon-conditioned temporal attention head.
+
+    Instead of using only the last encoder token, each forecast horizon
+    learns its own soft attention over all T timesteps. This preserves
+    temporal evolution patterns (trend, slope, periodicity) that the last-
+    token summary discards — patterns critical for H4-H6 prediction.
+
+    For each horizon h:
+      1. Score each timestep: score_t = scorer_h · x_t   (linear H → 1)
+      2. Normalize over T:    weights = softmax(scores)
+      3. Weighted pool:       context_h = Σ_t weights_t · x_t   (B, N, H)
+      4. Predict:             LayerNorm → fc1 → GELU → Dropout → fc2 → scalar
+
+    The MLP (fc1, fc2) is shared across all horizons — only the temporal
+    attention scorer is per-horizon. This limits parameter growth while
+    keeping horizon-specific temporal focus.
+
+    Why this might work when cross-attention failed:
+      - Simpler scoring (linear H→1 vs full QKV projections) → more stable gradients
+      - No interaction between horizon queries → independent optimization per step
+      - Does NOT compete with persistence residual (residual is added after head output)
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int,
+        output_dim: int = 1,
+        horizon: int = 6,
+        dropout: float = 0.1,
+        max_horizon: int = 24,
+    ):
+        super().__init__()
+        self.horizon = horizon
+        self.max_horizon = max(horizon, max_horizon)
+        self.hidden_dim = hidden_dim
+
+        # Per-horizon temporal attention scorers: (max_horizon, H)
+        # scorer_h · x_t gives the unnormalized attention score for timestep t at horizon h
+        self.horizon_scorers = nn.Parameter(torch.empty(self.max_horizon, hidden_dim))
+        nn.init.xavier_uniform_(self.horizon_scorers)
+
+        # Shared MLP: same weights applied to each horizon's pooled context
+        self.norm = nn.LayerNorm(hidden_dim)
+        self.fc1 = nn.Linear(hidden_dim, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, output_dim)
+        self.drop = nn.Dropout(dropout)
+
+    def forward(self, x: torch.Tensor, horizon: int = None) -> torch.Tensor:
+        """
+        Args:
+            x:       (B, N, T, H) — full encoder sequence per node
+            horizon: optional override (must be <= max_horizon)
+        Returns:
+            (B, horizon, N, output_dim)
+        """
+        if horizon is None:
+            horizon = self.horizon
+        if horizon > self.max_horizon:
+            raise ValueError(
+                f"Requested horizon {horizon} > max_horizon {self.max_horizon}."
+            )
+
+        B, N, T, H = x.shape
+
+        # Flatten batch and node dimensions for vectorised attention
+        x_flat = x.reshape(B * N, T, H)                           # (B*N, T, H)
+
+        # Compute per-horizon attention scores over all T timesteps.
+        # horizon_scorers[:horizon]: (horizon, H) → transpose: (H, horizon)
+        # scores: (B*N, T, horizon)
+        scores = torch.matmul(x_flat, self.horizon_scorers[:horizon].t())
+
+        # Softmax over the time dimension → attention weights
+        weights = F.softmax(scores, dim=1)                         # (B*N, T, horizon)
+
+        # Weighted temporal pooling per horizon:
+        # context[b, s, h] = Σ_t weights[b, t, s] * x_flat[b, t, h]
+        # einsum: 'bth, bts -> bsh'  (t is summed, s=horizon step, h=feature dim)
+        context = torch.einsum('bth,bts->bsh', x_flat, weights)   # (B*N, horizon, H)
+
+        # Shared MLP applied to each (node, horizon) context vector
+        context = context.reshape(B * N * horizon, H)
+        context = self.norm(context)
+        context = F.gelu(self.fc1(context))
+        context = self.drop(context)
+        out = self.fc2(context)                                    # (B*N*horizon, output_dim)
+
+        out = out.reshape(B, N, horizon, -1)
+        out = out.permute(0, 2, 1, 3)                             # (B, horizon, N, output_dim)
+        return out
+
+
 class GraphTransformerModel(nn.Module):
     """
     Lightweight spatio-temporal Transformer for PM2.5 forecasting.
@@ -313,6 +416,7 @@ class GraphTransformerModel(nn.Module):
         num_gat_layers: int = 1,
         gat_version: str = 'v1',
         use_post_temporal_gat: bool = False,
+        use_temporal_attention_head: bool = False,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -320,6 +424,13 @@ class GraphTransformerModel(nn.Module):
         self.horizon = horizon
         self.use_learnable_alpha_gate = use_learnable_alpha_gate
         self.use_post_temporal_gat = use_post_temporal_gat
+        self.use_temporal_attention_head = use_temporal_attention_head
+
+        if use_temporal_attention_head and use_post_temporal_gat:
+            raise ValueError(
+                "use_temporal_attention_head and use_post_temporal_gat are mutually exclusive: "
+                "post_gat requires (B, N, H) but temporal_attention_head uses (B, N, T, H)."
+            )
 
         # Learnable alpha gate for wind/distance mixing in adjacency construction
         if use_learnable_alpha_gate:
@@ -343,6 +454,7 @@ class GraphTransformerModel(nn.Module):
             graph_conv=graph_conv,
             num_gat_layers=num_gat_layers,
             gat_version=gat_version,
+            return_full_sequence=use_temporal_attention_head,
         )
 
         # Post-temporal spatial refinement (optional).
@@ -363,13 +475,22 @@ class GraphTransformerModel(nn.Module):
             self.post_gat_norm = None
             self.post_gat = None
 
-        self.head = DirectHorizonHead(
-            hidden_dim=hidden_dim,
-            output_dim=output_dim,
-            horizon=horizon,
-            dropout=dropout,
-            max_horizon=max(horizon, 24),
-        )
+        if use_temporal_attention_head:
+            self.head = HorizonAttentionHead(
+                hidden_dim=hidden_dim,
+                output_dim=output_dim,
+                horizon=horizon,
+                dropout=dropout,
+                max_horizon=max(horizon, 24),
+            )
+        else:
+            self.head = DirectHorizonHead(
+                hidden_dim=hidden_dim,
+                output_dim=output_dim,
+                horizon=horizon,
+                dropout=dropout,
+                max_horizon=max(horizon, 24),
+            )
 
     def forward(
         self,
@@ -389,16 +510,18 @@ class GraphTransformerModel(nn.Module):
             predictions:     (B, horizon, N, output_dim)
             attention_weights: None  (kept for API compatibility)
         """
-        final_h = self.encoder(x, adj)            # (B, N, H)
+        # (B, N, H) when use_temporal_attention_head=False
+        # (B, N, T, H) when use_temporal_attention_head=True
+        enc_out = self.encoder(x, adj)
 
-        # Post-temporal spatial refinement: aggregate neighbours' temporal summaries.
-        # adj is (N,N) or (B,N,N) — GraphAttentionLayer handles both shapes directly.
+        # Post-temporal spatial refinement (only active when temporal_attention_head=False;
+        # mutual exclusion is enforced in __init__).
         if self.use_post_temporal_gat:
-            h_norm = self.post_gat_norm(final_h)  # Pre-LN: (B, N, H)
-            gat_out = self.post_gat(h_norm, adj)   # (B, N, H)
-            final_h = final_h + gat_out            # residual
+            h_norm = self.post_gat_norm(enc_out)   # Pre-LN: (B, N, H)
+            gat_out = self.post_gat(h_norm, adj)    # (B, N, H)
+            enc_out = enc_out + gat_out             # residual
 
-        predictions = self.head(final_h, horizon)  # (B, horizon, N, output_dim)
+        predictions = self.head(enc_out, horizon)  # (B, horizon, N, output_dim)
         return predictions, None
 
     def predict(self, x: torch.Tensor, adj: torch.Tensor, horizon: int = 6) -> torch.Tensor:
@@ -410,12 +533,12 @@ class GraphTransformerModel(nn.Module):
         """
         self.eval()
         with torch.no_grad():
-            final_h = self.encoder(x, adj)            # (B, N, H)
+            enc_out = self.encoder(x, adj)
             if self.use_post_temporal_gat:
-                h_norm = self.post_gat_norm(final_h)
+                h_norm = self.post_gat_norm(enc_out)
                 gat_out = self.post_gat(h_norm, adj)
-                final_h = final_h + gat_out
-            predictions = self.head(final_h, horizon)
+                enc_out = enc_out + gat_out
+            predictions = self.head(enc_out, horizon)
         return predictions.squeeze(-1)  # (B, horizon, N)
 
     def get_num_params(self) -> int:
