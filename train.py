@@ -121,7 +121,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_crossattn',  # GraphTransformer + GATv1 + persistence residual + cross-attention decoder
+    'architecture_name': 'graph_transformer_gat_v1_residual',  # GraphTransformer + GATv1 + persistence residual
     'hardware_tag': 'T4',       # Options: 'integrated_gpu', 'T4', 'rtx3090', etc.
     'use_versioned_checkpoint': True,       # If True, saves as <arch>_<hardware>_best.pt
 

@@ -5,27 +5,22 @@ Architecture:
     Input (B, T=24, N=12, F=33)
     → input projection (Linear F→H)
     → add learnable node identity embeddings (B, T, N, H)
-    → GAT spatial aggregation across all T timesteps at once
-        Pre-LN → GraphAttentionLayer → residual
-        Handles both static (N,N) and dynamic (B,N,N) adjacency
+    → GCN spatial aggregation across all T timesteps at once
+        Pre-LN → (B,T,N,H) @ (H,H) → adj @ support → LeakyReLU → residual
+        Handles both static (N,N) and dynamic (B,N,N) adjacency in one matmul
     → reshape (B, T, N, H) → (B*N, T, H)
     → sinusoidal positional encoding over T
     → small Transformer encoder (2 layers, Pre-LN, shared weights across nodes)
-    → full sequence retained → (B, N, T, H)
-    → cross-attention horizon decoder:
-        horizon queries (horizon, H) attend to full T-step sequence via MHA
-        Pre-LN on both queries and keys/values; residual on queries
-        shared 2-layer MLP → scalar per horizon
+    → last timestep token → (B, N, H)
+    → direct multi-horizon head:
+        for each step t: final_h + learned step_query[t] → 2-layer MLP → scalar
     → output (B, horizon, N, output_dim)
 
 Design rationale:
   - Temporal modeling is the dominant bottleneck on this dataset (empirical finding).
   - T=24 makes Transformer attention trivially cheap (24^2=576 per head).
-  - GAT is vectorised over T — no per-timestep loop.
+  - GCN is vectorised over T — no per-timestep loop.
   - Shared Transformer weights across N nodes keeps param count low.
-  - Cross-attention decoder: each horizon query learns which timesteps to attend to.
-    H+1 naturally focuses on recent history; H+6 aggregates longer patterns.
-    Directly addresses horizon degradation from the previous single-token bottleneck.
   - Direct decoding: no autoregression, no error accumulation.
   - API-compatible with GCNLSTMModel (same forward / predict / get_wind_alpha signature).
 """
@@ -67,7 +62,7 @@ class SpatioTemporalTransformerEncoder(nn.Module):
       2. GCN: aggregate neighbour information at every timestep simultaneously
          (one batched matmul — no loop over T)
       3. Reshape to (B*N, T, H) and apply small Transformer encoder per node
-      4. Return full sequence: (B, N, T, H) for cross-attention decoding
+      4. Return last-timestep representation: (B, N, H)
 
     The GCN uses a raw weight parameter rather than re-using GraphConvolution so
     that the 4-D input (B, T, N, H) can be handled without a timestep loop.
@@ -151,7 +146,7 @@ class SpatioTemporalTransformerEncoder(nn.Module):
             x:   (B, T, N, F)
             adj: (N, N) static  or  (B, N, N) dynamic
         Returns:
-            (B, N, T, H) — full sequence for cross-attention decoding
+            (B, N, H) — summary representation after seeing the full T-step window
         """
         B, T, N, _ = x.shape
 
@@ -199,9 +194,12 @@ class SpatioTemporalTransformerEncoder(nn.Module):
         # Full bidirectional attention: no causal mask needed (we have the full history)
         x = self.transformer(x)    # (B*N, T, H)
 
-        # Return full sequence — the cross-attention decoder will decide what to attend to
-        # per horizon step, rather than collapsing everything to a single token here.
-        return x.reshape(B, N, T, self.hidden_dim)   # (B, N, T, H)
+        # Last timestep: represents the model state after seeing the full 24h window.
+        # Forecasting-natural — analogous to an LSTM's final hidden state.
+        x = x[:, -1, :]            # (B*N, H)
+
+        # Reshape to (B, N, H)
+        return x.reshape(B, N, self.hidden_dim)
 
 
 class DirectHorizonHead(nn.Module):
@@ -275,112 +273,6 @@ class DirectHorizonHead(nn.Module):
         return out
 
 
-class CrossAttentionHorizonHead(nn.Module):
-    """
-    Cross-attention horizon decoder.
-
-    Each forecast horizon gets a learned query vector that attends to the full
-    T-step encoder sequence via multi-head cross-attention. This lets H+1 focus
-    on the most recent timesteps and H+6 aggregate longer temporal patterns —
-    something a single-token bottleneck cannot do.
-
-    Input:  encoder_seq (B, N, T, H) — full encoder output (all T timesteps)
-    Output: (B, horizon, N, output_dim)
-
-    Design:
-      - Pre-LN on both queries and encoder sequence before attention (consistent
-        with the rest of the codebase).
-      - Residual connection from horizon queries through attention output.
-      - Shared 2-layer MLP after attention (horizon-specific context already
-        captured by the attention weights; shared MLP just projects to output).
-      - No masking on keys — encoder sequence is fully observed history.
-    """
-
-    def __init__(
-        self,
-        hidden_dim: int,
-        output_dim: int = 1,
-        horizon: int = 6,
-        num_heads: int = 4,
-        dropout: float = 0.1,
-        max_horizon: int = 24,
-    ):
-        super().__init__()
-        self.horizon = horizon
-        self.max_horizon = max(horizon, max_horizon)
-        self.hidden_dim = hidden_dim
-
-        # One learnable query per forecast step (up to max_horizon)
-        self.horizon_queries = nn.Parameter(torch.empty(self.max_horizon, hidden_dim))
-        nn.init.xavier_uniform_(self.horizon_queries)
-
-        # Pre-LN applied to queries and encoder sequence before attention
-        self.norm_q  = nn.LayerNorm(hidden_dim)
-        self.norm_kv = nn.LayerNorm(hidden_dim)
-
-        # Cross-attention: Q = horizon queries, K = V = encoder sequence
-        # batch_first=True: all tensors are (batch, seq, dim)
-        self.cross_attn = nn.MultiheadAttention(
-            embed_dim=hidden_dim,
-            num_heads=num_heads,
-            dropout=dropout,
-            batch_first=True,
-        )
-
-        # Shared output MLP: norm → fc1 → GELU → dropout → fc2
-        # Shared because attention weights already carry the horizon-specific signal.
-        self.norm_out = nn.LayerNorm(hidden_dim)
-        self.fc1 = nn.Linear(hidden_dim, hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, output_dim)
-        self.drop = nn.Dropout(dropout)
-
-    def forward(self, encoder_seq: torch.Tensor, horizon: int = None) -> torch.Tensor:
-        """
-        Args:
-            encoder_seq: (B, N, T, H) — full encoder sequence
-            horizon:     optional override (must be <= max_horizon)
-        Returns:
-            (B, horizon, N, output_dim)
-        """
-        if horizon is None:
-            horizon = self.horizon
-        if horizon > self.max_horizon:
-            raise ValueError(
-                f"Requested horizon {horizon} > max_horizon {self.max_horizon}. "
-                "Re-initialise CrossAttentionHorizonHead with a larger max_horizon."
-            )
-
-        B, N, T, H = encoder_seq.shape
-
-        # Flatten nodes into batch dim so attention runs independently per node
-        seq = encoder_seq.reshape(B * N, T, H)              # (B*N, T, H)
-
-        # Expand horizon queries over batch*node
-        queries = self.horizon_queries[:horizon]             # (horizon, H)
-        queries = queries.unsqueeze(0).expand(B * N, -1, -1)  # (B*N, horizon, H)
-
-        # Pre-LN before attention (consistent with Pre-LN convention in this codebase)
-        q  = self.norm_q(queries)                           # (B*N, horizon, H)
-        kv = self.norm_kv(seq)                              # (B*N, T, H)
-
-        # Cross-attention: each horizon query attends to all T encoder timesteps
-        attn_out, _ = self.cross_attn(q, kv, kv)           # (B*N, horizon, H)
-
-        # Residual: add attention output back to original (un-normed) queries
-        attn_out = queries + attn_out                       # (B*N, horizon, H)
-
-        # Shared MLP across all horizons
-        out = self.norm_out(attn_out)                       # (B*N, horizon, H)
-        out = out.reshape(B * N * horizon, H)
-        out = F.gelu(self.fc1(out))
-        out = self.drop(out)
-        out = self.fc2(out)                                 # (B*N*horizon, output_dim)
-
-        out = out.reshape(B, N, horizon, -1)
-        out = out.permute(0, 2, 1, 3)                       # (B, horizon, N, output_dim)
-        return out
-
-
 class GraphTransformerModel(nn.Module):
     """
     Lightweight spatio-temporal Transformer for PM2.5 forecasting.
@@ -447,11 +339,10 @@ class GraphTransformerModel(nn.Module):
             gat_version=gat_version,
         )
 
-        self.head = CrossAttentionHorizonHead(
+        self.head = DirectHorizonHead(
             hidden_dim=hidden_dim,
             output_dim=output_dim,
             horizon=horizon,
-            num_heads=num_heads,
             dropout=dropout,
             max_horizon=max(horizon, 24),
         )
@@ -474,8 +365,8 @@ class GraphTransformerModel(nn.Module):
             predictions:     (B, horizon, N, output_dim)
             attention_weights: None  (kept for API compatibility)
         """
-        enc_seq = self.encoder(x, adj)              # (B, N, T, H)
-        predictions = self.head(enc_seq, horizon)   # (B, horizon, N, output_dim)
+        final_h = self.encoder(x, adj)            # (B, N, H)
+        predictions = self.head(final_h, horizon)  # (B, horizon, N, output_dim)
         return predictions, None
 
     def predict(self, x: torch.Tensor, adj: torch.Tensor, horizon: int = 6) -> torch.Tensor:
@@ -487,8 +378,8 @@ class GraphTransformerModel(nn.Module):
         """
         self.eval()
         with torch.no_grad():
-            enc_seq = self.encoder(x, adj)              # (B, N, T, H)
-            predictions = self.head(enc_seq, horizon)   # (B, horizon, N, output_dim)
+            final_h = self.encoder(x, adj)
+            predictions = self.head(final_h, horizon)
         return predictions.squeeze(-1)  # (B, horizon, N)
 
     def get_num_params(self) -> int:
