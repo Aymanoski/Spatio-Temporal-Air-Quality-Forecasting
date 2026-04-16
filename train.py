@@ -57,15 +57,16 @@ CONFIG = {
     'use_post_temporal_gat': False,  # FAILED: Test MAE 21.022, destabilized training
     'use_temporal_attention_head': False,  # FAILED: Test MAE 21.353, full-sequence access doesn't help
 
-    # t-24 daily anchor residual.
-    # Adds a learnable-gated PM2.5 value from 24h ago as a second output anchor.
-    # prediction = model_delta + y_last + σ(t24_logit) * y_{t-24}
-    # Hypothesis: PM2.5 has strong daily periodicity — y_{t-24} is a useful prior
-    # for H4-H6 that y_last alone doesn't capture.
-    # y_{t-24} is already in the input (first timestep), but not as a direct output skip.
-    # Compare against: Val 18.834 / Test 20.624 / RMSE 37.729.
-    'use_t24_residual': True,
+    # t-24 daily anchor — FAILED: gate→0.073, wider val/test gap, Test MAE 21.193
+    'use_t24_residual': False,
     'initial_t24_alpha': 0.3,
+
+    # Horizon-aware loss weighting.
+    # Upweights H4-H6 in the MSE to push the model toward long-horizon accuracy.
+    # Weights are normalized (mean=1) so overall loss scale is preserved.
+    # Baseline per-horizon MAE: H1=10.45, H2=15.99, H3=19.81, H4=23.00, H5=25.89, H6=28.60
+    # Compare against uniform baseline: Val 18.834 / Test 20.624 / RMSE 37.729.
+    'horizon_loss_weights': [1.0, 1.0, 1.0, 1.5, 2.0, 2.5],
 
     # Residual prediction: model outputs delta from last-observed PM2.5 (persistence baseline).
     # final_prediction = model_output + last_observed_PM2.5
@@ -133,7 +134,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_t24',  # GraphTransformer + GATv1 + persistence residual + t-24 daily anchor
+    'architecture_name': 'graph_transformer_gat_v1_residual_horizonw',  # GraphTransformer + GATv1 + persistence residual + horizon-aware loss weights [1,1,1,1.5,2,2.5]
     'hardware_tag': 'T4',       # Options: 'integrated_gpu', 'T4', 'rtx3090', etc.
     'use_versioned_checkpoint': True,       # If True, saves as <arch>_<hardware>_best.pt
 
@@ -164,7 +165,8 @@ class EVTHybridLoss(nn.Module):
     """
 
     def __init__(self, threshold, lambda_tail=0.05, xi=0.10, eps=1e-6,
-                 asymmetric_penalty=False, under_penalty_multiplier=2.0):
+                 asymmetric_penalty=False, under_penalty_multiplier=2.0,
+                 horizon_weights=None):
         super().__init__()
         # threshold can be a float (global) or a 1D array-like (per node).
         thr = torch.as_tensor(threshold, dtype=torch.float32)
@@ -175,13 +177,29 @@ class EVTHybridLoss(nn.Module):
         self.asymmetric_penalty = asymmetric_penalty
         self.under_penalty_multiplier = float(under_penalty_multiplier)
 
+        # Per-horizon loss weights: (H,) tensor, normalized so mean == 1.
+        # Upweighting later horizons pushes the model to prioritize H4-H6.
+        # Applied only to the base MSE; tail loss is left unweighted (lambda=0.05).
+        if horizon_weights is not None:
+            hw = torch.as_tensor(horizon_weights, dtype=torch.float32)
+            hw = hw / hw.mean()   # normalize: preserves overall loss scale
+            self.register_buffer("horizon_weights", hw)
+        else:
+            self.register_buffer("horizon_weights", None)
+
     def set_lambda(self, new_lambda):
         """Update lambda weight (for adaptive scheduling)."""
         self.lambda_tail = float(new_lambda)
 
     def forward(self, predictions, targets):
-        # Base MSE loss for all predictions
-        mse = F.mse_loss(predictions, targets)
+        # Base MSE — optionally weighted per horizon.
+        # predictions/targets: (B, H, N)
+        if self.horizon_weights is not None:
+            H = predictions.shape[1]
+            w = self.horizon_weights[:H].to(predictions.device).view(1, -1, 1)
+            mse = ((predictions - targets) ** 2 * w).mean()
+        else:
+            mse = F.mse_loss(predictions, targets)
 
         # Identify extreme values (above threshold)
         thr = self.threshold.to(device=targets.device, dtype=targets.dtype)
@@ -904,7 +922,8 @@ def train(config, trial=None):
             lambda_tail=initial_lambda,
             xi=config['evt_xi'],
             asymmetric_penalty=config.get('evt_asymmetric_penalty', False),
-            under_penalty_multiplier=config.get('evt_under_penalty_multiplier', 2.0)
+            under_penalty_multiplier=config.get('evt_under_penalty_multiplier', 2.0),
+            horizon_weights=config.get('horizon_loss_weights', None),
         )
 
         # Print configuration
@@ -919,6 +938,12 @@ def train(config, trial=None):
             f"q={config['evt_tail_quantile']}, xi={config['evt_xi']}, "
             f"threshold={thr_str})"
         )
+        hw = config.get('horizon_loss_weights', None)
+        if hw is not None:
+            import numpy as _np
+            hw_arr = _np.array(hw, dtype=float)
+            hw_norm = hw_arr / hw_arr.mean()
+            print(f"  Horizon weights (normalized): {[round(w, 3) for w in hw_norm.tolist()]}")
 
         if config.get('evt_asymmetric_penalty', False):
             print(
