@@ -1,5 +1,5 @@
 """
-Flexible evaluation script for checkpointed GCN-LSTM models.
+Flexible evaluation script for checkpointed spatio-temporal models.
 
 This tester is designed to:
 1. Evaluate any checkpoint in ``models/checkpoints`` whose architecture is still
@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -32,7 +33,7 @@ import torch
 # Add parent directory to path for model/training imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from models import create_model
+from models import GCNLSTMModel, GraphTransformerModel
 from train import (
     CONFIG as TRAIN_CONFIG,
     build_dynamic_adjacency,
@@ -85,6 +86,132 @@ BASE_33_FEATURE_COLS = [
 
 ANGLE_FEATURE_COLS = ["wind_dir_sin", "wind_dir_cos"]
 LEGACY_35_FEATURE_COLS = BASE_33_FEATURE_COLS[:17] + ANGLE_FEATURE_COLS + BASE_33_FEATURE_COLS[17:]
+
+
+def infer_model_type(checkpoint_config: dict[str, Any], state_dict: dict[str, torch.Tensor]) -> str:
+    configured = checkpoint_config.get("model_type")
+    if configured in {"gcn_lstm", "graph_transformer"}:
+        return str(configured)
+
+    has_transformer_head = any(key.startswith("head.") for key in state_dict)
+    has_transformer_encoder = any(key.startswith("encoder.transformer.layers.") for key in state_dict)
+    if has_transformer_head or has_transformer_encoder:
+        return "graph_transformer"
+
+    return "gcn_lstm"
+
+
+def infer_graph_conv(checkpoint_config: dict[str, Any], state_dict: dict[str, torch.Tensor], model_type: str) -> str:
+    configured = checkpoint_config.get("graph_conv")
+    if configured in {"gcn", "gat"}:
+        return str(configured)
+
+    if model_type == "graph_transformer":
+        if any(key.startswith("encoder.gat_layers.") for key in state_dict):
+            return "gat"
+        if "encoder.gcn_weight" in state_dict:
+            return "gcn"
+
+    has_gat_signatures = any(
+        (
+            key.startswith("encoder.layers.")
+            or key.startswith("decoder.layers.")
+            or key.startswith("encoder.gat_layers.")
+        )
+        and (".attn_vec" in key or ".W." in key or ".W_src." in key or ".W_dst." in key)
+        for key in state_dict
+    )
+    return "gat" if has_gat_signatures else "gcn"
+
+
+def infer_gat_version(checkpoint_config: dict[str, Any], state_dict: dict[str, torch.Tensor]) -> str:
+    configured = checkpoint_config.get("gat_version")
+    if configured in {"v1", "v2"}:
+        return str(configured)
+
+    has_v2_signatures = any(".W_src." in key or ".W_dst." in key for key in state_dict)
+    return "v2" if has_v2_signatures else "v1"
+
+
+def infer_layer_count(state_dict: dict[str, torch.Tensor], pattern: str) -> int | None:
+    regex = re.compile(pattern)
+    indices: set[int] = set()
+
+    for key in state_dict:
+        match = regex.match(key)
+        if match:
+            indices.add(int(match.group(1)))
+
+    if not indices:
+        return None
+    return max(indices) + 1
+
+
+def infer_num_tf_layers(checkpoint_config: dict[str, Any], state_dict: dict[str, torch.Tensor]) -> int:
+    configured = checkpoint_config.get("num_tf_layers")
+    if configured is not None:
+        return int(configured)
+
+    inferred = infer_layer_count(state_dict, r"^encoder\.transformer\.layers\.(\d+)\.")
+    if inferred is not None:
+        return inferred
+
+    return int(TRAIN_CONFIG.get("num_tf_layers", 2))
+
+
+def infer_num_gat_layers(checkpoint_config: dict[str, Any], state_dict: dict[str, torch.Tensor]) -> int:
+    configured = checkpoint_config.get("num_gat_layers")
+    if configured is not None:
+        return int(configured)
+
+    inferred = infer_layer_count(state_dict, r"^encoder\.gat_layers\.(\d+)\.")
+    if inferred is not None:
+        return inferred
+
+    return int(TRAIN_CONFIG.get("num_gat_layers", 1))
+
+
+def build_model_from_config(config: dict[str, Any]) -> torch.nn.Module:
+    model_type = str(config.get("model_type", "gcn_lstm"))
+
+    if model_type == "graph_transformer":
+        return GraphTransformerModel(
+            input_dim=int(config.get("input_dim", 33)),
+            hidden_dim=int(config.get("hidden_dim", 64)),
+            output_dim=int(config.get("output_dim", 1)),
+            num_nodes=int(config.get("num_nodes", 12)),
+            num_tf_layers=int(config.get("num_tf_layers", 2)),
+            num_heads=int(config.get("num_heads", 4)),
+            ffn_dim=config.get("ffn_dim", None),
+            dropout=float(config.get("dropout", 0.1)),
+            horizon=int(config.get("horizon", 6)),
+            use_node_embeddings=bool(config.get("use_node_embeddings", True)),
+            use_learnable_alpha_gate=bool(config.get("use_learnable_alpha_gate", False)),
+            initial_wind_alpha=float(config.get("wind_alpha", 0.6)),
+            graph_conv=str(config.get("graph_conv", "gcn")),
+            num_gat_layers=int(config.get("num_gat_layers", 1)),
+            gat_version=str(config.get("gat_version", "v1")),
+        )
+
+    if model_type == "gcn_lstm":
+        return GCNLSTMModel(
+            input_dim=int(config.get("input_dim", 33)),
+            hidden_dim=int(config.get("hidden_dim", 64)),
+            output_dim=int(config.get("output_dim", 1)),
+            num_nodes=int(config.get("num_nodes", 12)),
+            num_layers=int(config.get("num_layers", 2)),
+            num_heads=int(config.get("num_heads", 4)),
+            dropout=float(config.get("dropout", 0.1)),
+            horizon=int(config.get("horizon", 6)),
+            use_direct_decoding=bool(config.get("use_direct_decoding", False)),
+            use_learnable_alpha_gate=bool(config.get("use_learnable_alpha_gate", False)),
+            initial_wind_alpha=float(config.get("wind_alpha", 0.6)),
+            use_node_embeddings=bool(config.get("use_node_embeddings", True)),
+            use_attention=bool(config.get("use_attention", True)),
+            graph_conv=str(config.get("graph_conv", "gcn")),
+        )
+
+    raise ValueError(f"Unsupported model_type in checkpoint config: {model_type}")
 
 
 def compute_rmse(pred: np.ndarray, target: np.ndarray) -> float:
@@ -236,15 +363,41 @@ def refresh_feature_config(config: dict[str, Any], feature_cols: list[str]) -> N
 
 
 def prepare_checkpoint_config(checkpoint: dict[str, Any], device: str) -> dict[str, Any]:
+    checkpoint_config = dict(checkpoint.get("config", {}))
     config = dict(TRAIN_CONFIG)
-    config.update(checkpoint.get("config", {}))
+    config.update(checkpoint_config)
 
     state_dict = checkpoint["model_state_dict"]
-    config["use_direct_decoding"] = "decoder.step_queries" in state_dict
+    config["model_type"] = infer_model_type(checkpoint_config, state_dict)
+    config["graph_conv"] = infer_graph_conv(checkpoint_config, state_dict, config["model_type"])
+    config["gat_version"] = infer_gat_version(checkpoint_config, state_dict)
+
+    if config["model_type"] == "graph_transformer":
+        config["num_tf_layers"] = infer_num_tf_layers(checkpoint_config, state_dict)
+        if config["graph_conv"] == "gat":
+            config["num_gat_layers"] = infer_num_gat_layers(checkpoint_config, state_dict)
+
+    config["use_direct_decoding"] = (
+        config["model_type"] == "graph_transformer" or "decoder.step_queries" in state_dict
+    )
     config["use_attention"] = any(key.startswith("decoder.attention.") for key in state_dict)
     config["use_learnable_alpha_gate"] = "alpha_logit" in state_dict
     config["use_learnable_sigma"] = "log_sigma" in state_dict
     config["use_node_embeddings"] = any(key.startswith("encoder.node_embed.") for key in state_dict)
+
+    if "use_persistence_residual" in checkpoint_config:
+        config["use_persistence_residual"] = bool(checkpoint_config["use_persistence_residual"])
+    else:
+        arch_name = str(
+            checkpoint_config.get("architecture_name")
+            or checkpoint.get("architecture", {}).get("name", "")
+        ).lower()
+        config["use_persistence_residual"] = "residual" in arch_name
+
+    if "target_feature_idx" in checkpoint_config:
+        config["target_feature_idx"] = int(checkpoint_config["target_feature_idx"])
+    else:
+        config["target_feature_idx"] = 0
 
     config["device"] = device
     config.setdefault("train_ratio", TRAIN_CONFIG.get("train_ratio", 0.7))
@@ -265,7 +418,7 @@ def load_model_for_checkpoint(
     allow_partial_load: bool = True
 ) -> tuple[torch.nn.Module, dict[str, list[str]]]:
     checkpoint = torch.load(checkpoint_path, weights_only=False, map_location="cpu")
-    model = create_model(config).to(device)
+    model = build_model_from_config(config).to(device)
 
     try:
         model.load_state_dict(checkpoint["model_state_dict"], strict=True)
@@ -346,6 +499,8 @@ def run_model_predictions(
     device: str
 ) -> np.ndarray:
     use_wind_adj = config.get("use_wind_adjacency", False)
+    use_residual = config.get("use_persistence_residual", False)
+    target_feature_idx = int(config.get("target_feature_idx", 0))
     batch_size = int(config.get("batch_size", 32))
     adj_tensor = torch.as_tensor(adj, dtype=torch.float32, device=device)
     all_preds = []
@@ -368,6 +523,11 @@ def run_model_predictions(
                 adj_batch = adj_tensor
 
             pred = model.predict(batch_x, adj_batch, horizon=config["horizon"])
+
+            if use_residual:
+                y_last = batch_x[:, -1, :, target_feature_idx]
+                pred = pred + y_last.unsqueeze(1).expand_as(pred)
+
             all_preds.append(pred.detach().cpu().numpy())
 
     return np.concatenate(all_preds, axis=0)
@@ -465,6 +625,11 @@ def evaluate_checkpoint(
         "input_dim": config["input_dim"],
         "used_feature_cols": checkpoint_feature_cols,
         "config": {
+            "model_type": config.get("model_type"),
+            "graph_conv": config.get("graph_conv"),
+            "gat_version": config.get("gat_version"),
+            "num_tf_layers": config.get("num_tf_layers"),
+            "num_gat_layers": config.get("num_gat_layers"),
             "use_direct_decoding": config.get("use_direct_decoding", False),
             "use_wind_adjacency": config.get("use_wind_adjacency", False),
             "use_learnable_alpha_gate": config.get("use_learnable_alpha_gate", False),
@@ -473,6 +638,8 @@ def evaluate_checkpoint(
             "wind_direction_method": config.get("wind_direction_method"),
             "wind_temporal_graphs": config.get("wind_temporal_graphs", 1),
             "wind_temporal_graph_window": config.get("wind_temporal_graph_window"),
+            "use_persistence_residual": config.get("use_persistence_residual", False),
+            "target_feature_idx": config.get("target_feature_idx", 0),
             "loss_type": config.get("loss_type"),
         },
         "load_info": load_info,
@@ -557,7 +724,7 @@ def main() -> list[dict[str, Any]]:
     checkpoint_paths = collect_checkpoint_paths(args)
 
     print("=" * 72)
-    print("GCN-LSTM CHECKPOINT EVALUATION")
+    print("CHECKPOINT EVALUATION")
     print("=" * 72)
     print(f"Device: {device}")
     print(f"Data:   {data_path}")
