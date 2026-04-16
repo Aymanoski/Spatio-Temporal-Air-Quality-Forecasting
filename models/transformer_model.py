@@ -208,12 +208,9 @@ class DirectHorizonHead(nn.Module):
 
     Predicts all forecast steps jointly (no autoregression).
     For each step t a learnable query is added to the encoder summary, then a
-    per-horizon 2-layer MLP maps to the scalar output.
+    small 2-layer MLP maps to the scalar output.
 
-    Each horizon has its own fc1 and fc2 weights, allowing the decoder to learn
-    a different nonlinear transformation per forecast step. This directly addresses
-    horizon degradation caused by a shared MLP that cannot distinguish near-term
-    from far-horizon predictions beyond a simple additive query bias.
+    Vectorised over the horizon dimension for efficiency.
     """
 
     def __init__(
@@ -233,19 +230,11 @@ class DirectHorizonHead(nn.Module):
         self.step_queries = nn.Parameter(torch.empty(self.max_horizon, hidden_dim))
         nn.init.xavier_uniform_(self.step_queries)
 
-        # Shared input normalisation — applied before each per-horizon head
+        # Pre-LN → Linear → GELU → Dropout → Linear
         self.norm = nn.LayerNorm(hidden_dim)
+        self.fc1 = nn.Linear(hidden_dim, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, output_dim)
         self.drop = nn.Dropout(dropout)
-
-        # Per-horizon MLP heads: each step gets its own fc1 + fc2.
-        # H1 learns a near-term correction; H6 learns a long-horizon mapping.
-        # Param overhead vs shared: (max_horizon - 1) × (H² + H·output_dim) ≈ 150K for H=64, h=6
-        self.fc1 = nn.ModuleList([
-            nn.Linear(hidden_dim, hidden_dim) for _ in range(self.max_horizon)
-        ])
-        self.fc2 = nn.ModuleList([
-            nn.Linear(hidden_dim, output_dim) for _ in range(self.max_horizon)
-        ])
 
     def forward(self, final_h: torch.Tensor, horizon: int = None) -> torch.Tensor:
         """
@@ -265,18 +254,22 @@ class DirectHorizonHead(nn.Module):
 
         B, N, H = final_h.shape
 
-        outputs = []
-        for t in range(horizon):
-            # Add horizon-specific query to encoder summary: (B, N, H)
-            h_t = final_h + self.step_queries[t]   # broadcast over B, N
-            h_t = h_t.reshape(B * N, H)
-            h_t = self.norm(h_t)
-            h_t = F.gelu(self.fc1[t](h_t))
-            h_t = self.drop(h_t)
-            h_t = self.fc2[t](h_t)                 # (B*N, output_dim)
-            outputs.append(h_t.reshape(B, N, -1))  # (B, N, output_dim)
+        # Vectorised: expand final_h and broadcast step queries
+        # final_h: (B, N, H) → (B, N, horizon, H)
+        final_h_exp = final_h.unsqueeze(2).expand(-1, -1, horizon, -1)
+        # step_queries: (horizon, H) → (1, 1, horizon, H)
+        queries = self.step_queries[:horizon].view(1, 1, horizon, H)
+        combined = final_h_exp + queries   # (B, N, horizon, H)
 
-        out = torch.stack(outputs, dim=1)           # (B, horizon, N, output_dim)
+        # Flatten batch dims for MLP, then restore
+        combined = combined.reshape(B * N * horizon, H)
+        combined = self.norm(combined)
+        combined = F.gelu(self.fc1(combined))
+        combined = self.drop(combined)
+        out = self.fc2(combined)           # (B*N*horizon, output_dim)
+
+        out = out.reshape(B, N, horizon, -1)
+        out = out.permute(0, 2, 1, 3)     # (B, horizon, N, output_dim)
         return out
 
 
