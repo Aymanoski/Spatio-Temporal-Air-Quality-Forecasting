@@ -54,14 +54,18 @@ CONFIG = {
     'graph_conv': 'gat',
     'num_gat_layers': 1,   # Number of stacked GAT layers (1=1-hop, 2=2-hop neighbourhood)
     'gat_version': 'v1',  # 'v1' = standard GAT, 'v2' = GATv2 (dynamic attention)
-    'use_post_temporal_gat': False,  # Post-temporal GAT: FAILED (Test MAE 21.022, destabilized training)
+    'use_post_temporal_gat': False,  # FAILED: Test MAE 21.022, destabilized training
+    'use_temporal_attention_head': False,  # FAILED: Test MAE 21.353, full-sequence access doesn't help
 
-    # Horizon-conditioned temporal attention head.
-    # Replaces last-token pooling with per-horizon soft attention over all T timesteps.
-    # Hypothesis: H4-H6 degradation is caused by collapsing T=24 → 1 vector.
-    # Each horizon h learns which timesteps to attend to (trend, slope, periodicity).
-    # Compare against DirectHorizonHead baseline: Val 18.834 / Test 20.624 / RMSE 37.729.
-    'use_temporal_attention_head': True,
+    # t-24 daily anchor residual.
+    # Adds a learnable-gated PM2.5 value from 24h ago as a second output anchor.
+    # prediction = model_delta + y_last + σ(t24_logit) * y_{t-24}
+    # Hypothesis: PM2.5 has strong daily periodicity — y_{t-24} is a useful prior
+    # for H4-H6 that y_last alone doesn't capture.
+    # y_{t-24} is already in the input (first timestep), but not as a direct output skip.
+    # Compare against: Val 18.834 / Test 20.624 / RMSE 37.729.
+    'use_t24_residual': True,
+    'initial_t24_alpha': 0.3,
 
     # Residual prediction: model outputs delta from last-observed PM2.5 (persistence baseline).
     # final_prediction = model_output + last_observed_PM2.5
@@ -129,7 +133,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_temporalpool',  # GraphTransformer + GATv1 + persistence residual + horizon-conditioned temporal attention head
+    'architecture_name': 'graph_transformer_gat_v1_residual_t24',  # GraphTransformer + GATv1 + persistence residual + t-24 daily anchor
     'hardware_tag': 'T4',       # Options: 'integrated_gpu', 'T4', 'rtx3090', etc.
     'use_versioned_checkpoint': True,       # If True, saves as <arch>_<hardware>_best.pt
 
@@ -587,6 +591,15 @@ def train_epoch(model, train_loader, optimizer, criterion, adj, config, teacher_
             # expand to (B, horizon, N) and add to model delta output
             predictions = predictions + y_last.unsqueeze(1).expand_as(predictions)
 
+        # t-24 daily anchor: add learnable-gated PM2.5 from 24h ago.
+        # y_{t-24} is the first timestep of the 24h lookback window (index 0).
+        # Gradient flows through t24_alpha so the gate is optimized end-to-end.
+        if config.get('use_t24_residual', False):
+            feat_idx = config.get('target_feature_idx', 0)
+            y_t24 = X_batch[:, 0, :, feat_idx]                        # (B, N)
+            t24_alpha = model.get_t24_alpha()                          # scalar tensor
+            predictions = predictions + t24_alpha * y_t24.unsqueeze(1).expand_as(predictions)
+
         # Compute loss
         loss = criterion(predictions, Y_batch)
         
@@ -650,6 +663,13 @@ def validate(model, val_loader, criterion, adj, config, target_scaler=None):
                 y_last = X_batch[:, -1, :, feat_idx]
                 predictions = predictions + y_last.unsqueeze(1).expand_as(predictions)
 
+            # t-24 daily anchor
+            if config.get('use_t24_residual', False):
+                feat_idx = config.get('target_feature_idx', 0)
+                y_t24 = X_batch[:, 0, :, feat_idx]
+                t24_alpha = model.get_t24_alpha()
+                predictions = predictions + t24_alpha * y_t24.unsqueeze(1).expand_as(predictions)
+
             loss = criterion(predictions, Y_batch)
             total_loss += loss.item()
 
@@ -681,6 +701,7 @@ def compute_metrics(model, test_loader, adj, config, target_scaler=None):
     all_targets = []
 
     use_residual = config.get('use_persistence_residual', False)
+    use_t24 = config.get('use_t24_residual', False)
     feat_idx = config.get('target_feature_idx', 0)
 
     with torch.no_grad():
@@ -700,6 +721,12 @@ def compute_metrics(model, test_loader, adj, config, target_scaler=None):
             if use_residual:
                 y_last = X_batch[:, -1, :, feat_idx]                   # (B, N)
                 predictions = predictions + y_last.unsqueeze(1).expand_as(predictions)
+
+            # t-24 daily anchor
+            if use_t24:
+                y_t24 = X_batch[:, 0, :, feat_idx]                     # (B, N)
+                t24_alpha = model.get_t24_alpha()
+                predictions = predictions + t24_alpha * y_t24.unsqueeze(1).expand_as(predictions)
 
             all_preds.append(predictions.cpu().numpy())
             all_targets.append(Y_batch.numpy())
@@ -839,6 +866,8 @@ def train(config, trial=None):
             gat_version=config.get('gat_version', 'v1'),
             use_post_temporal_gat=config.get('use_post_temporal_gat', False),
             use_temporal_attention_head=config.get('use_temporal_attention_head', False),
+            use_t24_residual=config.get('use_t24_residual', False),
+            initial_t24_alpha=config.get('initial_t24_alpha', 0.3),
         ).to(device)
         print(f"  Model type: GraphTransformerModel  graph_conv={config.get('graph_conv', 'gcn')}  gat_version={config.get('gat_version', 'v1')}  num_gat_layers={config.get('num_gat_layers', 1)}  post_gat={config.get('use_post_temporal_gat', False)}  temporal_attn_head={config.get('use_temporal_attention_head', False)}")
     else:
@@ -1007,6 +1036,8 @@ def train(config, trial=None):
         alpha_str = ""
         if config.get('use_wind_adjacency', False) and config.get('use_learnable_alpha_gate', False):
             alpha_str = f"Alpha: {float(model.get_wind_alpha().detach().cpu()):.3f} | "
+        if config.get('use_t24_residual', False):
+            alpha_str += f"T24: {float(model.get_t24_alpha().detach().cpu()):.3f} | "
 
         # Display current lambda if using schedule
         lambda_str = ""

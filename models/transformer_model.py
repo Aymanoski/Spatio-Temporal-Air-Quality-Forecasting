@@ -417,6 +417,8 @@ class GraphTransformerModel(nn.Module):
         gat_version: str = 'v1',
         use_post_temporal_gat: bool = False,
         use_temporal_attention_head: bool = False,
+        use_t24_residual: bool = False,
+        initial_t24_alpha: float = 0.3,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -425,6 +427,20 @@ class GraphTransformerModel(nn.Module):
         self.use_learnable_alpha_gate = use_learnable_alpha_gate
         self.use_post_temporal_gat = use_post_temporal_gat
         self.use_temporal_attention_head = use_temporal_attention_head
+        self.use_t24_residual = use_t24_residual
+
+        # Learnable gate for t-24 daily anchor.
+        # prediction = model_delta + y_last + σ(t24_logit) * y_{t-24}
+        # Initialized to initial_t24_alpha so the model starts with a small but
+        # nonzero daily anchor and learns the optimal weight end-to-end.
+        if use_t24_residual:
+            t24_alpha = float(initial_t24_alpha)
+            t24_alpha = min(max(t24_alpha, 1e-4), 1.0 - 1e-4)
+            self.t24_logit = nn.Parameter(
+                torch.logit(torch.tensor(t24_alpha, dtype=torch.float32))
+            )
+        else:
+            self.register_parameter("t24_logit", None)
 
         if use_temporal_attention_head and use_post_temporal_gat:
             raise ValueError(
@@ -545,7 +561,13 @@ class GraphTransformerModel(nn.Module):
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
     def get_wind_alpha(self):
-        """Return current alpha in [0, 1], or None if not learnable."""
+        """Return current wind/distance mixing alpha in [0, 1], or None if not learnable."""
         if not self.use_learnable_alpha_gate or self.alpha_logit is None:
             return None
         return torch.sigmoid(self.alpha_logit)
+
+    def get_t24_alpha(self):
+        """Return current t-24 residual gate in [0, 1], or None if not enabled."""
+        if not self.use_t24_residual or self.t24_logit is None:
+            return None
+        return torch.sigmoid(self.t24_logit)
