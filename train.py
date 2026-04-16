@@ -54,6 +54,7 @@ CONFIG = {
     'graph_conv': 'gat',
     'num_gat_layers': 1,   # Number of stacked GAT layers (1=1-hop, 2=2-hop neighbourhood)
     'gat_version': 'v1',  # 'v1' = standard GAT, 'v2' = GATv2 (dynamic attention)
+    'use_post_temporal_gat': True,  # Post-temporal spatial GAT: aggregate neighbours' 24h summaries after Transformer
 
     # Residual prediction: model outputs delta from last-observed PM2.5 (persistence baseline).
     # final_prediction = model_output + last_observed_PM2.5
@@ -81,7 +82,7 @@ CONFIG = {
     'evt_threshold_mode': 'global',      # Populated from training targets
 
     # EVT Improvements: DISABLED (fixed λ=0.05 validation)
-    'evt_asymmetric_penalty': True,        # Disabled for baseline comparison
+    'evt_asymmetric_penalty': False,        # Disabled for baseline comparison
     'evt_under_penalty_multiplier': 2.0,    # Not used when asymmetric_penalty=False
     'evt_use_lambda_schedule': False,       # Disabled - using fixed λ=0.05
     'evt_lambda_schedule': {
@@ -121,7 +122,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_48h',  # GraphTransformer + GATv1 + persistence residual + 48h input window
+    'architecture_name': 'graph_transformer_gat_v1_residual_postgat',  # GraphTransformer + GATv1 + persistence residual + post-temporal GAT
     'hardware_tag': 'T4',       # Options: 'integrated_gpu', 'T4', 'rtx3090', etc.
     'use_versioned_checkpoint': True,       # If True, saves as <arch>_<hardware>_best.pt
 
@@ -829,8 +830,9 @@ def train(config, trial=None):
             graph_conv=config.get('graph_conv', 'gcn'),
             num_gat_layers=config.get('num_gat_layers', 1),
             gat_version=config.get('gat_version', 'v1'),
+            use_post_temporal_gat=config.get('use_post_temporal_gat', False),
         ).to(device)
-        print(f"  Model type: GraphTransformerModel  graph_conv={config.get('graph_conv', 'gcn')}  gat_version={config.get('gat_version', 'v1')}  num_gat_layers={config.get('num_gat_layers', 1)}")
+        print(f"  Model type: GraphTransformerModel  graph_conv={config.get('graph_conv', 'gcn')}  gat_version={config.get('gat_version', 'v1')}  num_gat_layers={config.get('num_gat_layers', 1)}  post_gat={config.get('use_post_temporal_gat', False)}")
     else:
         model = GCNLSTMModel(
             input_dim=config['input_dim'],

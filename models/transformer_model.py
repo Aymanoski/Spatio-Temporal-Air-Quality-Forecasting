@@ -12,6 +12,10 @@ Architecture:
     → sinusoidal positional encoding over T
     → small Transformer encoder (2 layers, Pre-LN, shared weights across nodes)
     → last timestep token → (B, N, H)
+    → post-temporal spatial GAT:
+        Pre-LN → GraphAttentionLayer(H→H) → residual
+        Each node aggregates its neighbours' 24h temporal summaries
+        Uses the same wind-aware adjacency as the pre-temporal GAT
     → direct multi-horizon head:
         for each step t: final_h + learned step_query[t] → 2-layer MLP → scalar
     → output (B, horizon, N, output_dim)
@@ -308,12 +312,14 @@ class GraphTransformerModel(nn.Module):
         graph_conv: str = 'gcn',
         num_gat_layers: int = 1,
         gat_version: str = 'v1',
+        use_post_temporal_gat: bool = False,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.num_nodes = num_nodes
         self.horizon = horizon
         self.use_learnable_alpha_gate = use_learnable_alpha_gate
+        self.use_post_temporal_gat = use_post_temporal_gat
 
         # Learnable alpha gate for wind/distance mixing in adjacency construction
         if use_learnable_alpha_gate:
@@ -338,6 +344,24 @@ class GraphTransformerModel(nn.Module):
             num_gat_layers=num_gat_layers,
             gat_version=gat_version,
         )
+
+        # Post-temporal spatial refinement (optional).
+        # Applied after the Transformer produces (B, N, H) node summaries.
+        # Each node aggregates its neighbours' temporal summaries via the same
+        # wind-aware adjacency used in the pre-temporal GAT.
+        # Pre-LN + GAT + residual — identical pattern to the encoder's spatial step.
+        # Ablation: set use_post_temporal_gat=False to recover the base model.
+        if use_post_temporal_gat:
+            self.post_gat_norm = nn.LayerNorm(hidden_dim)
+            self.post_gat = GraphAttentionLayer(
+                in_features=hidden_dim,
+                out_features=hidden_dim,
+                dropout=dropout,
+                version=gat_version,
+            )
+        else:
+            self.post_gat_norm = None
+            self.post_gat = None
 
         self.head = DirectHorizonHead(
             hidden_dim=hidden_dim,
@@ -366,6 +390,14 @@ class GraphTransformerModel(nn.Module):
             attention_weights: None  (kept for API compatibility)
         """
         final_h = self.encoder(x, adj)            # (B, N, H)
+
+        # Post-temporal spatial refinement: aggregate neighbours' temporal summaries.
+        # adj is (N,N) or (B,N,N) — GraphAttentionLayer handles both shapes directly.
+        if self.use_post_temporal_gat:
+            h_norm = self.post_gat_norm(final_h)  # Pre-LN: (B, N, H)
+            gat_out = self.post_gat(h_norm, adj)   # (B, N, H)
+            final_h = final_h + gat_out            # residual
+
         predictions = self.head(final_h, horizon)  # (B, horizon, N, output_dim)
         return predictions, None
 
@@ -378,7 +410,11 @@ class GraphTransformerModel(nn.Module):
         """
         self.eval()
         with torch.no_grad():
-            final_h = self.encoder(x, adj)
+            final_h = self.encoder(x, adj)            # (B, N, H)
+            if self.use_post_temporal_gat:
+                h_norm = self.post_gat_norm(final_h)
+                gat_out = self.post_gat(h_norm, adj)
+                final_h = final_h + gat_out
             predictions = self.head(final_h, horizon)
         return predictions.squeeze(-1)  # (B, horizon, N)
 
