@@ -769,5 +769,77 @@ def build_dynamic_adjacency_gpu(X_batch, config, alpha_override=None, sigma_over
     return adj_batch
 
 
+def build_per_timestep_adjacency_gpu(X_batch, config, alpha_override=None, sigma_override=None):
+    """
+    Build a per-timestep wind-aware adjacency sequence from the input batch.
+
+    Unlike build_dynamic_adjacency_gpu (which aggregates wind over the full
+    24-timestep window into one (B, N, N) matrix), this builds a separate A_t
+    for each timestep t using the instantaneous wind conditions at that timestep.
+
+    The result allows the spatial message-passing step to use the actual wind
+    direction/speed at each observed hour rather than a single temporal summary.
+
+    Args:
+        X_batch:        (batch, timesteps, num_nodes, features) tensor ON GPU
+        config:         configuration dict (same as build_dynamic_adjacency_gpu)
+        alpha_override: learnable alpha scalar tensor, or None to use config value
+        sigma_override: learnable sigma scalar tensor, or None to use config value
+
+    Returns:
+        adj_seq: (batch, timesteps, num_nodes, num_nodes) tensor ON GPU
+    """
+    B, T, N, _ = X_batch.shape
+    device = X_batch.device
+
+    wind_speed_idx   = config['wind_speed_idx']
+    wind_dir_start   = config['wind_dir_start_idx']
+    wind_dir_end     = config['wind_dir_end_idx']
+    calm_threshold   = config.get('wind_calm_speed_threshold', 0.1)
+
+    # --- Extract instantaneous wind at every timestep ---
+    wind_speeds = X_batch[:, :, :, wind_speed_idx]           # (B, T, N)
+    wind_dirs   = X_batch[:, :, :, wind_dir_start:wind_dir_end]  # (B, T, N, C)
+
+    # --- Convert one-hot direction → continuous angle (no temporal aggregation) ---
+    static = _precompute_static_matrices(device)
+    cat_angles_deg = static['category_angles']                # (C,)
+    cat_angles_rad = cat_angles_deg * (torch.pi / 180.0)
+
+    sin_comp = torch.sin(cat_angles_rad)                      # (C,)
+    cos_comp = torch.cos(cat_angles_rad)                      # (C,)
+
+    # Circular mean over the one-hot categories at each (B, T, N) position
+    sin_vals = (wind_dirs * sin_comp).sum(-1)                 # (B, T, N)
+    cos_vals = (wind_dirs * cos_comp).sum(-1)                 # (B, T, N)
+
+    angles = torch.atan2(sin_vals, cos_vals) * (180.0 / torch.pi)  # (B, T, N)
+    angles = (angles + 360.0) % 360.0
+
+    # Mark calm / variable winds as -1
+    calm_mask     = wind_speeds < calm_threshold
+    resultant     = torch.sqrt(sin_vals.pow(2) + cos_vals.pow(2))
+    variable_mask = resultant < 1e-6
+    angles = torch.where(calm_mask | variable_mask, torch.full_like(angles, -1.0), angles)
+
+    # --- Treat each (sample, timestep) as an independent batch item ---
+    # (B, T, N) → (B*T, N)
+    speeds_flat = wind_speeds.reshape(B * T, N)
+    angles_flat = angles.reshape(B * T, N)
+
+    alpha = config['wind_alpha'] if alpha_override is None else alpha_override
+    sigma = config['distance_sigma'] if sigma_override is None else sigma_override
+
+    adj_flat = build_wind_aware_adjacency_gpu(
+        speeds_flat,
+        angles_flat,
+        alpha=alpha,
+        distance_sigma=sigma,
+        calm_speed_threshold=calm_threshold,
+    )  # (B*T, N, N)
+
+    return adj_flat.reshape(B, T, N, N)
+
+
 if __name__ == "__main__":
     build_adjacency()

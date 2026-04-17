@@ -39,6 +39,7 @@ from train import (
     build_dynamic_adjacency,
     fit_scalers_on_train,
     scale_data,
+    scale_future_met,
     split_data,
 )
 from utils.graph import WIND_DIRECTION_MAP
@@ -191,6 +192,11 @@ def build_model_from_config(config: dict[str, Any]) -> torch.nn.Module:
             graph_conv=str(config.get("graph_conv", "gcn")),
             num_gat_layers=int(config.get("num_gat_layers", 1)),
             gat_version=str(config.get("gat_version", "v1")),
+            use_post_temporal_gat=bool(config.get("use_post_temporal_gat", False)),
+            use_temporal_attention_head=bool(config.get("use_temporal_attention_head", False)),
+            use_t24_residual=bool(config.get("use_t24_residual", False)),
+            initial_t24_alpha=float(config.get("initial_t24_alpha", 0.3)),
+            future_met_dim=int(config.get("future_met_dim", 0)),
         )
 
     if model_type == "gcn_lstm":
@@ -385,6 +391,36 @@ def prepare_checkpoint_config(checkpoint: dict[str, Any], device: str) -> dict[s
     config["use_learnable_sigma"] = "log_sigma" in state_dict
     config["use_node_embeddings"] = any(key.startswith("encoder.node_embed.") for key in state_dict)
 
+    # Transformer variant flags that affect module topology.
+    # Prefer explicit checkpoint config when present, otherwise infer from state dict keys.
+    config["use_temporal_attention_head"] = bool(
+        checkpoint_config.get(
+            "use_temporal_attention_head",
+            any(key.startswith("head.horizon_scorers") for key in state_dict),
+        )
+    )
+    config["use_post_temporal_gat"] = bool(
+        checkpoint_config.get(
+            "use_post_temporal_gat",
+            any(key.startswith("post_gat.") or key.startswith("post_gat_norm.") for key in state_dict),
+        )
+    )
+    config["use_t24_residual"] = bool(
+        checkpoint_config.get(
+            "use_t24_residual",
+            "t24_logit" in state_dict,
+        )
+    )
+    if "initial_t24_alpha" in checkpoint_config:
+        config["initial_t24_alpha"] = float(checkpoint_config["initial_t24_alpha"])
+
+    # Detect oracle future meteorology from state dict
+    config["use_future_met"] = "head.future_met_proj.weight" in state_dict
+    if config["use_future_met"]:
+        config["future_met_dim"] = int(state_dict["head.future_met_proj.weight"].shape[1])
+    else:
+        config["future_met_dim"] = 0
+
     if "use_persistence_residual" in checkpoint_config:
         config["use_persistence_residual"] = bool(checkpoint_config["use_persistence_residual"])
     else:
@@ -437,11 +473,13 @@ def load_model_for_checkpoint(
     return model, load_info
 
 
-def load_raw_data(data_path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def load_raw_data(data_path: Path, input_len: int = 24) -> tuple:
     X = np.load(data_path / "X.npy")
     Y = np.load(data_path / "Y.npy")
     adj = np.load(data_path / "adjacency.npy")
-    return X, Y, adj
+    z_path = data_path / f"Z_{input_len}.npy"
+    Z = np.load(z_path) if z_path.exists() else None
+    return X, Y, adj, Z
 
 
 def evaluate_predictions(
@@ -496,7 +534,8 @@ def run_model_predictions(
     X_test: np.ndarray,
     adj: np.ndarray,
     config: dict[str, Any],
-    device: str
+    device: str,
+    Z_test: np.ndarray | None = None,
 ) -> np.ndarray:
     use_wind_adj = config.get("use_wind_adjacency", False)
     use_residual = config.get("use_persistence_residual", False)
@@ -522,7 +561,12 @@ def run_model_predictions(
             else:
                 adj_batch = adj_tensor
 
-            pred = model.predict(batch_x, adj_batch, horizon=config["horizon"])
+            # Future meteorology batch (oracle, only when checkpoint was trained with it)
+            z_batch = None
+            if Z_test is not None:
+                z_batch = torch.as_tensor(Z_test[start:start + batch_size], dtype=torch.float32, device=device)
+
+            pred = model.predict(batch_x, adj_batch, horizon=config["horizon"], future_met=z_batch)
 
             if use_residual:
                 y_last = batch_x[:, -1, :, target_feature_idx]
@@ -557,7 +601,8 @@ def evaluate_checkpoint(
     checkpoint = torch.load(checkpoint_path, weights_only=False, map_location="cpu")
     config = prepare_checkpoint_config(checkpoint, device=device)
 
-    raw_X, raw_Y, adj = load_raw_data(data_path)
+    input_len = int(config.get("input_len", 24))
+    raw_X, raw_Y, adj, raw_Z = load_raw_data(data_path, input_len=input_len)
     current_feature_cols = get_current_feature_cols(data_path, observed_feature_dim=int(raw_X.shape[-1]))
     checkpoint_feature_cols = infer_checkpoint_feature_cols(config, current_feature_cols)
     refresh_feature_config(config, checkpoint_feature_cols)
@@ -574,8 +619,17 @@ def evaluate_checkpoint(
     if already_scaled:
         X_test_scaled = X_test.astype(np.float32)
         Y_test_scaled = Y_test.astype(np.float32)
+        Z_test_scaled = None
     else:
         X_test_scaled, Y_test_scaled = scale_data(X_test, Y_test, feature_scaler, target_scaler, config)
+
+        # Scale future met test split if this checkpoint used oracle future meteorology
+        Z_test_scaled = None
+        if config.get("use_future_met") and raw_Z is not None:
+            n = len(aligned_X)
+            val_end = int(n * (config["train_ratio"] + config["val_ratio"]))
+            Z_test_raw = raw_Z[val_end:]
+            Z_test_scaled = scale_future_met(Z_test_raw, feature_scaler, config)
 
     model, load_info = load_model_for_checkpoint(
         checkpoint_path=checkpoint_path,
@@ -584,7 +638,9 @@ def evaluate_checkpoint(
         allow_partial_load=allow_partial_load,
     )
 
-    predictions_scaled = run_model_predictions(model, X_test_scaled, adj, config, device=device)
+    predictions_scaled = run_model_predictions(
+        model, X_test_scaled, adj, config, device=device, Z_test=Z_test_scaled
+    )
     predictions, targets, is_original_scale = inverse_transform_predictions(
         predictions_scaled,
         Y_test_scaled,
@@ -635,6 +691,10 @@ def evaluate_checkpoint(
             "use_learnable_alpha_gate": config.get("use_learnable_alpha_gate", False),
             "use_learnable_sigma": config.get("use_learnable_sigma", False),
             "use_node_embeddings": config.get("use_node_embeddings", True),
+            "use_temporal_attention_head": config.get("use_temporal_attention_head", False),
+            "use_post_temporal_gat": config.get("use_post_temporal_gat", False),
+            "use_t24_residual": config.get("use_t24_residual", False),
+            "use_future_met": config.get("use_future_met", False),
             "wind_direction_method": config.get("wind_direction_method"),
             "wind_temporal_graphs": config.get("wind_temporal_graphs", 1),
             "wind_temporal_graph_window": config.get("wind_temporal_graph_window"),

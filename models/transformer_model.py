@@ -169,12 +169,17 @@ class SpatioTemporalTransformerEncoder(nn.Module):
 
         # 3. Spatial aggregation (stacked GAT or single GCN, Pre-LN + residual per layer)
         if self.graph_conv == 'gat':
-            # Expand adj once for all T — same graph used at every timestep.
-            # (N,N) or (B,N,N) → (B*T, N, N)
+            # Flatten adj to (B*T, N, N) so the GAT loop sees one matrix per
+            # (sample, timestep) pair, regardless of how adj was constructed:
+            #   (N, N)      — static: same graph for all B and T
+            #   (B, N, N)   — dynamic: one aggregated graph per sample
+            #   (B, T, N, N)— per-timestep: separate graph for each observed hour
             if adj.dim() == 2:
                 adj_flat = adj.unsqueeze(0).expand(B * T, -1, -1)
-            else:
+            elif adj.dim() == 3:
                 adj_flat = adj.unsqueeze(1).expand(-1, T, -1, -1).reshape(B * T, N, N)
+            else:  # (B, T, N, N) — per-timestep adjacency
+                adj_flat = adj.reshape(B * T, N, N)
 
             for gat_layer, gat_norm in zip(self.gat_layers, self.gat_norms):
                 x_norm = gat_norm(x)                                         # (B, T, N, H)
@@ -187,9 +192,11 @@ class SpatioTemporalTransformerEncoder(nn.Module):
             support = torch.matmul(x_norm, self.gcn_weight) + self.gcn_bias  # (B, T, N, H)
             if adj.dim() == 2:
                 gcn_out = torch.matmul(adj, support)                         # (B, T, N, H)
-            else:
+            elif adj.dim() == 3:
                 adj_t = adj.unsqueeze(1).expand(-1, T, -1, -1)
                 gcn_out = torch.matmul(adj_t, support)                       # (B, T, N, H)
+            else:  # (B, T, N, N) — per-timestep adjacency
+                gcn_out = torch.matmul(adj, support)                         # (B, T, N, H)
             gcn_out = F.leaky_relu(gcn_out, negative_slope=0.1)
             x = x + gcn_out                                                  # residual
 
