@@ -421,6 +421,12 @@ def prepare_checkpoint_config(checkpoint: dict[str, Any], device: str) -> dict[s
     else:
         config["future_met_dim"] = 0
 
+    # use_per_timestep_adj has no state_dict signature (it only affects adj construction,
+    # not model parameters). Explicitly read from checkpoint config with a safe default of
+    # False so that old checkpoints — which don't have this key — are never evaluated with
+    # per-timestep adj, regardless of what TRAIN_CONFIG currently contains.
+    config["use_per_timestep_adj"] = bool(checkpoint_config.get("use_per_timestep_adj", False))
+
     if "use_persistence_residual" in checkpoint_config:
         config["use_persistence_residual"] = bool(checkpoint_config["use_persistence_residual"])
     else:

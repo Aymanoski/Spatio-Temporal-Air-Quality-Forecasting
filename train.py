@@ -125,7 +125,15 @@ CONFIG = {
     # using instantaneous wind conditions at that hour, instead of one
     # aggregated adjacency for the full window.
     # Ablation vs graph_transformer_gat_v1_residual: only adj construction changes.
-    'use_per_timestep_adj': True,
+    'use_per_timestep_adj': False,
+
+    # Transport-time-weighted adjacency (experiment 2).
+    # Adds a Gaussian weight peaking when the pollutant transit time d/(speed*3.6)
+    # matches transport_h_ref hours, suppressing edges where transit time is a
+    # poor match for the 6-hour forecast horizon.
+    'use_transport_time_weight': True,
+    'transport_h_ref': 3.5,    # Reference transit time in hours (peak of Gaussian)
+    'transport_sigma': 8.0,    # Width of the transit-time Gaussian (hours)
 
     # Wind-aware adjacency
     'use_wind_adjacency': True,    # Use dynamic wind-aware adjacency
@@ -155,7 +163,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_pertstep',  # GraphTransformer + GATv1 + persistence residual + per-timestep dynamic adj
+    'architecture_name': 'graph_transformer_gat_v1_residual_transport',  # GraphTransformer + GATv1 + persistence residual + transport-time-weighted adj
     'hardware_tag': 'T4',       # Options: 'integrated_gpu', 'T4', 'rtx3090', etc.
     'use_versioned_checkpoint': True,       # If True, saves as <arch>_<hardware>_best.pt
 

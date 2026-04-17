@@ -552,7 +552,10 @@ def build_wind_aware_adjacency_gpu(
     wind_angles,
     alpha=0.6,
     distance_sigma=1800.0,
-    calm_speed_threshold=0.1
+    calm_speed_threshold=0.1,
+    use_transport_time_weight=False,
+    transport_h_ref=3.5,
+    transport_sigma=8.0,
 ):
     """
     GPU-optimized wind-aware adjacency with bidirectional alignment.
@@ -564,6 +567,10 @@ def build_wind_aware_adjacency_gpu(
         alpha: Wind influence weight (0=distance-only, 1=wind-only)
         distance_sigma: Distance decay parameter
         calm_speed_threshold: Speed below which wind direction is ignored
+        use_transport_time_weight: If True, apply transport-time Gaussian weight.
+            Peaks when pollutant transit time (d / speed) matches transport_h_ref hours.
+        transport_h_ref: Reference transit time in hours (peak of the Gaussian).
+        transport_sigma: Width of the transit-time Gaussian in hours.
 
     Returns:
         adj_batch: (batch, num_nodes, num_nodes) normalized adjacency tensor
@@ -624,6 +631,17 @@ def build_wind_aware_adjacency_gpu(
 
     # Wind component: alignment * speed_factor * distance_decay
     A_wind = alignment * wind_factor * dist_decay  # (batch, N, N)
+
+    # Optional transport-time Gaussian: peak when transit time ≈ transport_h_ref hours.
+    # transit_time[b, i, j] = dist[i,j] (km) / (speed_i (m/s) * 3.6) (km/h)
+    # For calm sources the factor is set to 1 (neutral) via safe_speeds clamping.
+    if use_transport_time_weight:
+        safe_speeds = wind_speeds.clamp(min=0.5) * 3.6  # (B, N) → km/h, floor at 1.8 km/h
+        transit_time = dist.unsqueeze(0) / safe_speeds.unsqueeze(2)  # (B, N, N)
+        time_factor = torch.exp(
+            -((transit_time - transport_h_ref) ** 2) / (transport_sigma ** 2)
+        )  # (B, N, N)
+        A_wind = A_wind * time_factor
 
     # Handle calm sources: set to neutral (0.5 * distance decay)
     calm_src = calm_mask.unsqueeze(2)  # (batch, N, 1)
@@ -763,7 +781,10 @@ def build_dynamic_adjacency_gpu(X_batch, config, alpha_override=None, sigma_over
         agg_angles,
         alpha=config['wind_alpha'] if alpha_override is None else alpha_override,
         distance_sigma=config['distance_sigma'] if sigma_override is None else sigma_override,
-        calm_speed_threshold=config.get('wind_calm_speed_threshold', 0.1)
+        calm_speed_threshold=config.get('wind_calm_speed_threshold', 0.1),
+        use_transport_time_weight=config.get('use_transport_time_weight', False),
+        transport_h_ref=config.get('transport_h_ref', 3.5),
+        transport_sigma=config.get('transport_sigma', 8.0),
     )
 
     return adj_batch
@@ -804,7 +825,7 @@ def build_per_timestep_adjacency_gpu(X_batch, config, alpha_override=None, sigma
     # --- Convert one-hot direction → continuous angle (no temporal aggregation) ---
     static = _precompute_static_matrices(device)
     cat_angles_deg = static['category_angles']                # (C,)
-    cat_angles_rad = cat_angles_deg * (torch.pi / 180.0)
+    cat_angles_rad = cat_angles_deg * (np.pi / 180.0)
 
     sin_comp = torch.sin(cat_angles_rad)                      # (C,)
     cos_comp = torch.cos(cat_angles_rad)                      # (C,)
@@ -813,7 +834,7 @@ def build_per_timestep_adjacency_gpu(X_batch, config, alpha_override=None, sigma
     sin_vals = (wind_dirs * sin_comp).sum(-1)                 # (B, T, N)
     cos_vals = (wind_dirs * cos_comp).sum(-1)                 # (B, T, N)
 
-    angles = torch.atan2(sin_vals, cos_vals) * (180.0 / torch.pi)  # (B, T, N)
+    angles = torch.atan2(sin_vals, cos_vals) * (180.0 / np.pi)  # (B, T, N)
     angles = (angles + 360.0) % 360.0
 
     # Mark calm / variable winds as -1
@@ -836,6 +857,9 @@ def build_per_timestep_adjacency_gpu(X_batch, config, alpha_override=None, sigma
         alpha=alpha,
         distance_sigma=sigma,
         calm_speed_threshold=calm_threshold,
+        use_transport_time_weight=config.get('use_transport_time_weight', False),
+        transport_h_ref=config.get('transport_h_ref', 3.5),
+        transport_sigma=config.get('transport_sigma', 8.0),
     )  # (B*T, N, N)
 
     return adj_flat.reshape(B, T, N, N)
