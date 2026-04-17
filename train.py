@@ -91,7 +91,7 @@ CONFIG = {
     #   'oracle'    — use observed future met (ceiling, not deployable)
     #   'predicted' — pre-train MeteorologicalForecaster, use its predictions (deployable)
     #   'persistence' — repeat last-observed met for all 6 future steps (simple baseline)
-    'met_forecast_mode': 'predicted',
+    'met_forecast_mode': 'persistence',
     'met_hidden_dim': 64,        # MetForecaster hidden dim (matches PM2.5 model)
     'met_pretrain_epochs': 25,   # max pre-training epochs for MetForecaster
     'met_pretrain_patience': 5,  # early stopping patience for MetForecaster pre-training
