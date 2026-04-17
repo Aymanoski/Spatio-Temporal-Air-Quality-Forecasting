@@ -197,6 +197,9 @@ def build_model_from_config(config: dict[str, Any]) -> torch.nn.Module:
             use_t24_residual=bool(config.get("use_t24_residual", False)),
             initial_t24_alpha=float(config.get("initial_t24_alpha", 0.3)),
             future_met_dim=int(config.get("future_met_dim", 0)),
+            use_multiscale_temporal=bool(config.get("use_multiscale_temporal", False)),
+            local_window=int(config.get("local_window", 6)),
+            n_local_layers=int(config.get("n_local_layers", 1)),
         )
 
     if model_type == "gcn_lstm":
@@ -421,11 +424,13 @@ def prepare_checkpoint_config(checkpoint: dict[str, Any], device: str) -> dict[s
     else:
         config["future_met_dim"] = 0
 
-    # use_per_timestep_adj has no state_dict signature (it only affects adj construction,
-    # not model parameters). Explicitly read from checkpoint config with a safe default of
-    # False so that old checkpoints — which don't have this key — are never evaluated with
-    # per-timestep adj, regardless of what TRAIN_CONFIG currently contains.
+    # These flags affect only adjacency construction (no model parameter signature).
+    # Explicitly read from checkpoint config with safe False defaults so that old
+    # checkpoints are never evaluated with the wrong adjacency, regardless of what
+    # TRAIN_CONFIG currently contains.
     config["use_per_timestep_adj"] = bool(checkpoint_config.get("use_per_timestep_adj", False))
+    config["use_physics_guided_adj"] = bool(checkpoint_config.get("use_physics_guided_adj", False))
+    config["use_transport_time_weight"] = bool(checkpoint_config.get("use_transport_time_weight", False))
 
     if "use_persistence_residual" in checkpoint_config:
         config["use_persistence_residual"] = bool(checkpoint_config["use_persistence_residual"])

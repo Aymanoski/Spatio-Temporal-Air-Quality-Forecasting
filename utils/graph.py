@@ -743,6 +743,114 @@ def aggregate_wind_gpu(wind_speeds, wind_directions, mode="recent_weighted",
     return agg_speeds, agg_angles
 
 
+def build_physics_guided_adjacency_gpu(
+    wind_speeds,
+    wind_angles,
+    alpha=0.6,
+    distance_sigma=1800.0,
+    calm_speed_threshold=0.1,
+    plume_sigma_cross=25.0,
+    plume_tau=4.0,
+):
+    """
+    Physics-guided Gaussian plume adjacency.
+
+    Replaces the isotropic distance decay with an asymmetric Gaussian plume kernel:
+      - Crosswind:  exp(-d_cross² / (2 * σ_c²))      — lateral plume spread
+      - Along-wind: exp(-d_along / (u_i * τ * 3.6))   — advection reach scaled by wind speed
+      - Upwind (d_along ≤ 0): fallback to neutral 0.5 * dist_decay (no plume upwind)
+
+    This is physically distinct from build_wind_aware_adjacency_gpu because the
+    distance kernel is asymmetric: downwind stations at the same distance receive
+    higher weight than crosswind stations, and upwind stations receive no plume signal.
+
+    Args:
+        wind_speeds:       (batch, N) m/s
+        wind_angles:       (batch, N) degrees (meteorological), or -1 for calm/variable
+        alpha:             weight on plume component vs pure distance (same hybrid as base model)
+        distance_sigma:    isotropic decay parameter for A_dist component
+        calm_speed_threshold: below this speed, direction is unreliable
+        plume_sigma_cross: lateral dispersion scale in km (Gaussian half-width at 1/e)
+        plume_tau:         along-wind timescale in hours; λ_along = u_i(km/h) * plume_tau
+
+    Returns:
+        adj_batch: (batch, N, N) normalized adjacency
+    """
+    device = wind_speeds.device
+    batch_size, num_nodes = wind_speeds.shape
+
+    static = _precompute_static_matrices(device)
+    dist    = static['dist']    # (N, N) km
+    bearing = static['bearing'] # (N, N) degrees, bearing from i to j
+
+    calm_mask = (wind_angles < 0) | (wind_speeds < calm_speed_threshold)  # (B, N)
+
+    # --- Distance-only component (same as base model) ---
+    if not torch.is_tensor(distance_sigma):
+        distance_sigma = torch.tensor(float(distance_sigma), dtype=wind_speeds.dtype, device=device)
+    else:
+        distance_sigma = distance_sigma.to(device=device, dtype=wind_speeds.dtype)
+    dist_decay = torch.exp(-dist.pow(2) / distance_sigma)  # (N, N)
+    A_dist = dist_decay + torch.eye(num_nodes, device=device)
+
+    # --- Plume geometry ---
+    # Transport direction: wind blows FROM angle → pollution moves TO (angle+180)
+    transport_dir = (wind_angles + 180.0) % 360.0  # (B, N)
+
+    # Signed angle between plume transport direction and the bearing i→j
+    angle_diff = transport_dir.unsqueeze(2) - bearing.unsqueeze(0)  # (B, N, N)
+    # Normalize to (-180, 180]
+    angle_diff = ((angle_diff + 180.0) % 360.0) - 180.0
+    angle_rad  = angle_diff * (np.pi / 180.0)
+
+    # Downwind (along-wind) and crosswind distance components
+    # d_along > 0 → j is downwind of i;  d_along < 0 → j is upwind
+    d_along = dist.unsqueeze(0) * torch.cos(angle_rad)   # (B, N, N), signed
+    d_cross = dist.unsqueeze(0) * torch.abs(torch.sin(angle_rad))  # (B, N, N), ≥0
+
+    # Lateral Gaussian: how far off the plume centreline is j?
+    gauss_cross = torch.exp(
+        -d_cross.pow(2) / (2.0 * plume_sigma_cross ** 2)
+    )  # (B, N, N)
+
+    # Along-wind exponential: plume reach scales with wind speed
+    # λ_along = u(m/s) * 3.6 (→ km/h) * τ (h) = km
+    safe_speed   = wind_speeds.clamp(min=0.5) * 3.6            # (B, N), km/h, floor 1.8
+    lambda_along = safe_speed.unsqueeze(2) * plume_tau          # (B, N, 1), km
+    # For d_along > 0: exp(-d/λ) decays along-wind; for d_along ≤ 0 we mask below.
+    exp_along = torch.exp(-d_along / lambda_along)              # (B, N, N)
+
+    # Wind speed factor (stronger wind → more transport)
+    wind_factor = torch.tanh(wind_speeds / 5.0).unsqueeze(2)   # (B, N, 1)
+
+    # Full plume weight (only valid downwind)
+    A_plume = wind_factor * gauss_cross * exp_along             # (B, N, N)
+
+    # Upwind stations (d_along ≤ 0) get neutral fallback — no plume signal upwind
+    neutral = (0.5 * dist_decay).unsqueeze(0)                   # (1, N, N)
+    downwind_mask = d_along > 0                                 # (B, N, N)
+    A_plume = torch.where(downwind_mask, A_plume, neutral)
+
+    # Calm sources also get neutral fallback
+    calm_src = calm_mask.unsqueeze(2)                           # (B, N, 1)
+    A_plume = torch.where(calm_src, neutral, A_plume)
+
+    # Self-loops
+    eye_batch = torch.eye(num_nodes, device=device).unsqueeze(0)
+    A_plume = A_plume + eye_batch
+
+    # Hybrid with pure-distance component
+    if not torch.is_tensor(alpha):
+        alpha = torch.tensor(float(alpha), dtype=wind_speeds.dtype, device=device)
+    else:
+        alpha = alpha.to(device=device, dtype=wind_speeds.dtype)
+
+    A = (1 - alpha) * A_dist.unsqueeze(0) + alpha * A_plume    # (B, N, N)
+
+    row_sum = A.sum(dim=-1, keepdim=True).clamp(min=1e-8)
+    return A / row_sum
+
+
 def build_dynamic_adjacency_gpu(X_batch, config, alpha_override=None, sigma_override=None):
     """
     Build dynamic wind-aware adjacency on GPU (no CPU transfer).
@@ -775,17 +883,32 @@ def build_dynamic_adjacency_gpu(X_batch, config, alpha_override=None, sigma_over
         calm_speed_threshold=config.get('wind_calm_speed_threshold', 0.1)
     )
 
-    # Build adjacency (with bidirectional alignment)
-    adj_batch = build_wind_aware_adjacency_gpu(
-        agg_speeds,
-        agg_angles,
-        alpha=config['wind_alpha'] if alpha_override is None else alpha_override,
-        distance_sigma=config['distance_sigma'] if sigma_override is None else sigma_override,
-        calm_speed_threshold=config.get('wind_calm_speed_threshold', 0.1),
-        use_transport_time_weight=config.get('use_transport_time_weight', False),
-        transport_h_ref=config.get('transport_h_ref', 3.5),
-        transport_sigma=config.get('transport_sigma', 8.0),
-    )
+    _alpha = config['wind_alpha'] if alpha_override is None else alpha_override
+    _sigma = config['distance_sigma'] if sigma_override is None else sigma_override
+    _calm  = config.get('wind_calm_speed_threshold', 0.1)
+
+    # Dispatch to physics-guided or standard wind-aware adjacency
+    if config.get('use_physics_guided_adj', False):
+        adj_batch = build_physics_guided_adjacency_gpu(
+            agg_speeds,
+            agg_angles,
+            alpha=_alpha,
+            distance_sigma=_sigma,
+            calm_speed_threshold=_calm,
+            plume_sigma_cross=config.get('plume_sigma_cross', 25.0),
+            plume_tau=config.get('plume_tau', 4.0),
+        )
+    else:
+        adj_batch = build_wind_aware_adjacency_gpu(
+            agg_speeds,
+            agg_angles,
+            alpha=_alpha,
+            distance_sigma=_sigma,
+            calm_speed_threshold=_calm,
+            use_transport_time_weight=config.get('use_transport_time_weight', False),
+            transport_h_ref=config.get('transport_h_ref', 3.5),
+            transport_sigma=config.get('transport_sigma', 8.0),
+        )
 
     return adj_batch
 

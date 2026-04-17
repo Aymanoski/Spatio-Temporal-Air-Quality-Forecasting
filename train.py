@@ -58,14 +58,10 @@ CONFIG = {
     'use_post_temporal_gat': False,  # FAILED: Test MAE 21.022, destabilized training
     'use_temporal_attention_head': False,  # FAILED: Test MAE 21.353, full-sequence access doesn't help
 
-    # Multi-scale temporal attention (experiment 3).
-    # Parallel local attention branch over the most recent `local_window` timesteps,
-    # fused with the global 24-step branch via a learned sigmoid gate.
-    # Motivation: pollution dynamics operate at multiple scales; the global branch may
-    # miss fine-grained recent patterns that a shorter attention window captures more sharply.
-    'use_multiscale_temporal': True,
-    'local_window': 6,       # number of recent timesteps for the local branch
-    'n_local_layers': 1,     # lighter local Transformer (1 layer vs 2 global)
+    # Multi-scale temporal attention (experiment 3) — FAILED: Test MAE 20.952, mild overfitting.
+    'use_multiscale_temporal': False,
+    'local_window': 6,
+    'n_local_layers': 1,
 
     # t-24 daily anchor — FAILED: gate→0.073, wider val/test gap, Test MAE 21.193
     'use_t24_residual': False,
@@ -141,8 +137,17 @@ CONFIG = {
     # matches transport_h_ref hours, suppressing edges where transit time is a
     # poor match for the 6-hour forecast horizon.
     'use_transport_time_weight': False,
-    'transport_h_ref': 3.5,    # Reference transit time in hours (peak of Gaussian)
-    'transport_sigma': 8.0,    # Width of the transit-time Gaussian (hours)
+    'transport_h_ref': 3.5,
+    'transport_sigma': 8.0,
+
+    # Physics-guided Gaussian plume adjacency (experiment 4).
+    # Replaces isotropic distance decay with asymmetric plume kernel:
+    #   crosswind: exp(-d_cross² / (2*σ_c²))
+    #   along-wind: exp(-d_along / (u_i * τ * 3.6))    [upwind → neutral fallback]
+    # Physically: stations downwind and close to the plume centreline get highest weight.
+    'use_physics_guided_adj': True,
+    'plume_sigma_cross': 25.0,   # km, lateral (crosswind) dispersion scale
+    'plume_tau': 4.0,            # hours, along-wind timescale (λ = u*τ)
 
     # Wind-aware adjacency
     'use_wind_adjacency': True,    # Use dynamic wind-aware adjacency
@@ -172,7 +177,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_multiscale',  # GraphTransformer + GATv1 + persistence residual + multi-scale temporal (global+local)
+    'architecture_name': 'graph_transformer_gat_v1_residual_plume',  # GraphTransformer + GATv1 + persistence residual + Gaussian plume adjacency
     'hardware_tag': 'T4',       # Options: 'integrated_gpu', 'T4', 'rtx3090', etc.
     'use_versioned_checkpoint': True,       # If True, saves as <arch>_<hardware>_best.pt
 
