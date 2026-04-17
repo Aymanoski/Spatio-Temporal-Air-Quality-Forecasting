@@ -224,6 +224,12 @@ class DirectHorizonHead(nn.Module):
     small 2-layer MLP maps to the scalar output.
 
     Vectorised over the horizon dimension for efficiency.
+
+    Optional: future_met_dim > 0 enables oracle future meteorology fusion.
+    Future met features (shape: B, horizon, N, F_met) are projected to hidden_dim
+    and added to the combined representation before the MLP. This gives the decoder
+    access to observed wind/met conditions during the forecast window — information
+    the encoder cannot see.
     """
 
     def __init__(
@@ -233,15 +239,23 @@ class DirectHorizonHead(nn.Module):
         horizon: int = 6,
         dropout: float = 0.1,
         max_horizon: int = 24,
+        future_met_dim: int = 0,
     ):
         super().__init__()
         self.horizon = horizon
         self.max_horizon = max(horizon, max_horizon)
         self.hidden_dim = hidden_dim
+        self.future_met_dim = future_met_dim
 
         # One learnable query per forecast step (up to max_horizon for flexibility)
         self.step_queries = nn.Parameter(torch.empty(self.max_horizon, hidden_dim))
         nn.init.xavier_uniform_(self.step_queries)
+
+        # Optional future meteorology projection: F_met → hidden_dim
+        if future_met_dim > 0:
+            self.future_met_proj = nn.Linear(future_met_dim, hidden_dim)
+        else:
+            self.future_met_proj = None
 
         # Pre-LN → Linear → GELU → Dropout → Linear
         self.norm = nn.LayerNorm(hidden_dim)
@@ -249,11 +263,13 @@ class DirectHorizonHead(nn.Module):
         self.fc2 = nn.Linear(hidden_dim, output_dim)
         self.drop = nn.Dropout(dropout)
 
-    def forward(self, final_h: torch.Tensor, horizon: int = None) -> torch.Tensor:
+    def forward(self, final_h: torch.Tensor, horizon: int = None,
+                future_met: torch.Tensor = None) -> torch.Tensor:
         """
         Args:
-            final_h: (B, N, H)
-            horizon: optional override (must be <= max_horizon)
+            final_h:    (B, N, H)
+            horizon:    optional override (must be <= max_horizon)
+            future_met: (B, horizon, N, F_met) or None
         Returns:
             (B, horizon, N, output_dim)
         """
@@ -273,6 +289,12 @@ class DirectHorizonHead(nn.Module):
         # step_queries: (horizon, H) → (1, 1, horizon, H)
         queries = self.step_queries[:horizon].view(1, 1, horizon, H)
         combined = final_h_exp + queries   # (B, N, horizon, H)
+
+        # Future meteorology: project and add to combined representation.
+        # future_met: (B, horizon, N, F_met) → permute → (B, N, horizon, F_met) → project → (B, N, horizon, H)
+        if self.future_met_proj is not None and future_met is not None:
+            fm = future_met.permute(0, 2, 1, 3)          # (B, N, horizon, F_met)
+            combined = combined + self.future_met_proj(fm)  # additive, keeps dim=H
 
         # Flatten batch dims for MLP, then restore
         combined = combined.reshape(B * N * horizon, H)
@@ -419,6 +441,7 @@ class GraphTransformerModel(nn.Module):
         use_temporal_attention_head: bool = False,
         use_t24_residual: bool = False,
         initial_t24_alpha: float = 0.3,
+        future_met_dim: int = 0,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -506,6 +529,7 @@ class GraphTransformerModel(nn.Module):
                 horizon=horizon,
                 dropout=dropout,
                 max_horizon=max(horizon, 24),
+                future_met_dim=future_met_dim,
             )
 
     def forward(
@@ -515,13 +539,15 @@ class GraphTransformerModel(nn.Module):
         target=None,
         horizon: int = 6,
         teacher_forcing_ratio: float = 0.0,
+        future_met: torch.Tensor = None,
     ):
         """
         Args:
-            x:   (B, T, N, F)
-            adj: (N, N) static  or  (B, N, N) dynamic
+            x:          (B, T, N, F)
+            adj:        (N, N) static  or  (B, N, N) dynamic
             target, teacher_forcing_ratio: ignored — direct decoding only
-            horizon: forecast steps
+            horizon:    forecast steps
+            future_met: (B, horizon, N, F_met) or None — oracle future meteorology
         Returns:
             predictions:     (B, horizon, N, output_dim)
             attention_weights: None  (kept for API compatibility)
@@ -537,13 +563,16 @@ class GraphTransformerModel(nn.Module):
             gat_out = self.post_gat(h_norm, adj)    # (B, N, H)
             enc_out = enc_out + gat_out             # residual
 
-        predictions = self.head(enc_out, horizon)  # (B, horizon, N, output_dim)
+        predictions = self.head(enc_out, horizon, future_met=future_met)  # (B, horizon, N, output_dim)
         return predictions, None
 
-    def predict(self, x: torch.Tensor, adj: torch.Tensor, horizon: int = 6) -> torch.Tensor:
+    def predict(self, x: torch.Tensor, adj: torch.Tensor, horizon: int = 6,
+                future_met: torch.Tensor = None) -> torch.Tensor:
         """
         Inference without teacher forcing.
 
+        Args:
+            future_met: (B, horizon, N, F_met) or None — oracle future meteorology
         Returns:
             (B, horizon, N)  — squeezed output dimension
         """
@@ -554,7 +583,7 @@ class GraphTransformerModel(nn.Module):
                 h_norm = self.post_gat_norm(enc_out)
                 gat_out = self.post_gat(h_norm, adj)
                 enc_out = enc_out + gat_out
-            predictions = self.head(enc_out, horizon)
+            predictions = self.head(enc_out, horizon, future_met=future_met)
         return predictions.squeeze(-1)  # (B, horizon, N)
 
     def get_num_params(self) -> int:
