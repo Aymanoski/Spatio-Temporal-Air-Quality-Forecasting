@@ -263,6 +263,127 @@ class SpatioTemporalTransformerEncoder(nn.Module):
         return x_out.reshape(B, N, self.hidden_dim)
 
 
+class MeteorologicalForecaster(nn.Module):
+    """
+    Graph-aware Transformer for predicting future meteorological conditions.
+
+    Predicts 6-step-ahead met features from the 24-step historical met window.
+    Designed as a learned replacement for oracle future meteorology in the PM2.5
+    pipeline. Pre-trained on (X_met, Z_met) with MSE loss, then frozen during
+    PM2.5 model training to generate Z_pred per batch.
+
+    Architecture mirrors GraphTransformerModel's encoder:
+      - Linear input projection + learnable node embeddings
+      - 1-layer GATv1 spatial aggregation (uses same dynamic wind-aware adjacency)
+      - 2-layer Transformer temporal encoder (Pre-LN, shared across nodes)
+      - Direct multi-step output head: step_queries + last token → MLP → 21 met features
+
+    Input:  (B, T=24, N=12, met_dim=21) — scaled met features from lookback window
+    Output: (B, H=6,  N=12, met_dim=21) — predicted future met (same scale as Z_scaled)
+
+    The 21 met features are: temp, pres, dewp, rain, wspm (scaled continuous, indices 0–4)
+    + 16-category wind direction one-hot (indices 5–20). This matches the oracle Z format.
+    """
+
+    def __init__(
+        self,
+        met_dim: int = 21,
+        hidden_dim: int = 64,
+        num_nodes: int = 12,
+        horizon: int = 6,
+        num_tf_layers: int = 2,
+        num_heads: int = 4,
+        ffn_dim: int = None,
+        dropout: float = 0.1,
+        gat_version: str = 'v1',
+    ):
+        super().__init__()
+        self.hidden_dim = hidden_dim
+        self.horizon = horizon
+        self.num_nodes = num_nodes
+
+        if ffn_dim is None:
+            ffn_dim = hidden_dim * 2
+
+        self.input_proj = nn.Linear(met_dim, hidden_dim)
+
+        self.node_embed = nn.Embedding(num_nodes, hidden_dim)
+        nn.init.normal_(self.node_embed.weight, mean=0.0, std=0.01)
+
+        # GAT spatial layer (Pre-LN + residual, identical pattern to PM2.5 encoder)
+        self.gat_norm  = nn.LayerNorm(hidden_dim)
+        self.gat_layer = GraphAttentionLayer(hidden_dim, hidden_dim, dropout=dropout, version=gat_version)
+
+        # Temporal Transformer
+        self.pos_encoding = TemporalPositionalEncoding(hidden_dim, dropout=dropout)
+        enc_layer = nn.TransformerEncoderLayer(
+            d_model=hidden_dim,
+            nhead=num_heads,
+            dim_feedforward=ffn_dim,
+            dropout=dropout,
+            activation='gelu',
+            norm_first=True,
+            batch_first=True,
+        )
+        self.transformer = nn.TransformerEncoder(
+            enc_layer,
+            num_layers=num_tf_layers,
+            norm=nn.LayerNorm(hidden_dim),
+            enable_nested_tensor=False,
+        )
+
+        # Direct multi-step output head
+        self.step_queries = nn.Parameter(torch.empty(horizon, hidden_dim))
+        nn.init.xavier_uniform_(self.step_queries)
+        self.fc1  = nn.Linear(hidden_dim, hidden_dim)
+        self.fc2  = nn.Linear(hidden_dim, met_dim)
+        self.drop = nn.Dropout(dropout)
+
+    def forward(self, x_met: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x_met: (B, T, N, met_dim) — scaled met features from lookback window
+            adj:   (N,N) static or (B,N,N) dynamic adjacency
+        Returns:
+            (B, horizon, N, met_dim) — predicted future met in same scale as Z_scaled
+        """
+        B, T, N, _ = x_met.shape
+
+        x = self.input_proj(x_met)                                    # (B, T, N, H)
+
+        node_ids = torch.arange(N, device=x.device)
+        x = x + self.node_embed(node_ids).unsqueeze(0).unsqueeze(0)  # broadcast over B, T
+
+        # GAT spatial (Pre-LN + residual)
+        if adj.dim() == 2:
+            adj_flat = adj.unsqueeze(0).expand(B * T, -1, -1)
+        elif adj.dim() == 3:
+            adj_flat = adj.unsqueeze(1).expand(-1, T, -1, -1).reshape(B * T, N, N)
+        else:
+            adj_flat = adj.reshape(B * T, N, N)
+
+        x_norm  = self.gat_norm(x)
+        x_flat  = x_norm.reshape(B * T, N, self.hidden_dim)
+        gat_out = self.gat_layer(x_flat, adj_flat).reshape(B, T, N, self.hidden_dim)
+        x = x + gat_out                                               # residual
+
+        # Temporal Transformer (shared weights across nodes)
+        x = x.permute(0, 2, 1, 3).reshape(B * N, T, self.hidden_dim)
+        x = self.pos_encoding(x)
+        x = self.transformer(x)                                       # (B*N, T, H)
+        last = x[:, -1, :]                                            # (B*N, H)
+
+        # Direct multi-step output: (B*N, 1, H) + (1, horizon, H) → (B*N, horizon, H)
+        combined = last.unsqueeze(1) + self.step_queries.unsqueeze(0) # (B*N, horizon, H)
+        combined = combined.reshape(B * N * self.horizon, self.hidden_dim)
+        combined = F.gelu(self.fc1(combined))
+        combined = self.drop(combined)
+        out = self.fc2(combined)                                       # (B*N*horizon, met_dim)
+
+        out = out.reshape(B, N, self.horizon, -1).permute(0, 2, 1, 3)  # (B, horizon, N, met_dim)
+        return out
+
+
 class DirectHorizonHead(nn.Module):
     """
     Direct multi-horizon prediction head.

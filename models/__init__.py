@@ -13,7 +13,7 @@ from .layers import GraphConvolution, GraphLSTMCell, MultiHeadAttention
 from .encoder import GraphLSTMEncoder
 from .decoder import GraphLSTMDecoder, DirectMultiHorizonDecoder
 from .model import GCNLSTMModel, create_model
-from .transformer_model import GraphTransformerModel
+from .transformer_model import GraphTransformerModel, MeteorologicalForecaster
 
 __all__ = [
     'GraphConvolution',
@@ -25,4 +25,5 @@ __all__ = [
     'GCNLSTMModel',
     'create_model',
     'GraphTransformerModel',
+    'MeteorologicalForecaster',
 ]
