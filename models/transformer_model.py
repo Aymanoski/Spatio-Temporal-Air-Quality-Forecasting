@@ -88,6 +88,9 @@ class SpatioTemporalTransformerEncoder(nn.Module):
         num_gat_layers: int = 1,
         gat_version: str = 'v1',
         return_full_sequence: bool = False,
+        use_multiscale_temporal: bool = False,
+        local_window: int = 6,
+        n_local_layers: int = 1,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -95,6 +98,7 @@ class SpatioTemporalTransformerEncoder(nn.Module):
         self.use_node_embeddings = use_node_embeddings
         self.graph_conv = graph_conv
         self.return_full_sequence = return_full_sequence
+        self.use_multiscale_temporal = use_multiscale_temporal
 
         if ffn_dim is None:
             ffn_dim = hidden_dim * 2  # compact: 2× hidden, not the usual 4×
@@ -144,6 +148,34 @@ class SpatioTemporalTransformerEncoder(nn.Module):
             norm=nn.LayerNorm(hidden_dim),     # final normalisation
             enable_nested_tensor=False,        # not supported with norm_first=True
         )
+
+        # --- Optional local attention branch for multi-scale temporal modeling ---
+        # Attends over only the last `local_window` timesteps (recent hours) using a
+        # lighter 1-layer Transformer. Its last-token output is fused with the global
+        # branch via a learned sigmoid gate.  Both branches share the same PE input.
+        if use_multiscale_temporal:
+            self.local_window = local_window
+            local_layer = nn.TransformerEncoderLayer(
+                d_model=hidden_dim,
+                nhead=num_heads,
+                dim_feedforward=ffn_dim,
+                dropout=dropout,
+                activation="gelu",
+                norm_first=True,
+                batch_first=True,
+            )
+            self.local_transformer = nn.TransformerEncoder(
+                local_layer,
+                num_layers=n_local_layers,
+                norm=nn.LayerNorm(hidden_dim),
+                enable_nested_tensor=False,
+            )
+            # Logit of the mixing weight on the local branch.
+            # Init=0 → sigmoid(0)=0.5, balanced start.
+            self.local_gate_logit = nn.Parameter(torch.zeros(1))
+        else:
+            self.local_transformer = None
+            self.local_gate_logit = None
 
         self.dropout = nn.Dropout(dropout)
 
@@ -206,20 +238,29 @@ class SpatioTemporalTransformerEncoder(nn.Module):
 
         x = self.pos_encoding(x)   # sinusoidal PE over T
 
-        # Full bidirectional attention: no causal mask needed (we have the full history)
-        x = self.transformer(x)    # (B*N, T, H)
+        # Global branch: full bidirectional attention over all T timesteps
+        x_global = self.transformer(x)    # (B*N, T, H)
 
         if self.return_full_sequence:
             # Return all T token representations for attention-based heads.
             # Shape: (B, N, T, H)
-            return x.reshape(B, N, T, self.hidden_dim)
+            return x_global.reshape(B, N, T, self.hidden_dim)
 
-        # Last timestep: represents the model state after seeing the full 24h window.
-        # Forecasting-natural — analogous to an LSTM's final hidden state.
-        x = x[:, -1, :]            # (B*N, H)
+        # Multi-scale: fuse global last-token with local (recent window) last-token.
+        # Both branches see the same PE-encoded input; local branch attends over
+        # only the last `local_window` timesteps using a lighter 1-layer Transformer.
+        if self.use_multiscale_temporal:
+            x_local_in = x[:, -self.local_window:, :]       # (B*N, T_local, H)
+            x_local = self.local_transformer(x_local_in)    # (B*N, T_local, H)
+            gate = torch.sigmoid(self.local_gate_logit)      # scalar in (0, 1)
+            last_global = x_global[:, -1, :]                 # (B*N, H)
+            last_local = x_local[:, -1, :]                   # (B*N, H)
+            x_out = (1 - gate) * last_global + gate * last_local
+        else:
+            # Last timestep: analogous to an LSTM's final hidden state.
+            x_out = x_global[:, -1, :]                       # (B*N, H)
 
-        # Reshape to (B, N, H)
-        return x.reshape(B, N, self.hidden_dim)
+        return x_out.reshape(B, N, self.hidden_dim)
 
 
 class DirectHorizonHead(nn.Module):
@@ -449,6 +490,9 @@ class GraphTransformerModel(nn.Module):
         use_t24_residual: bool = False,
         initial_t24_alpha: float = 0.3,
         future_met_dim: int = 0,
+        use_multiscale_temporal: bool = False,
+        local_window: int = 6,
+        n_local_layers: int = 1,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -501,6 +545,9 @@ class GraphTransformerModel(nn.Module):
             num_gat_layers=num_gat_layers,
             gat_version=gat_version,
             return_full_sequence=use_temporal_attention_head,
+            use_multiscale_temporal=use_multiscale_temporal,
+            local_window=local_window,
+            n_local_layers=n_local_layers,
         )
 
         # Post-temporal spatial refinement (optional).

@@ -58,6 +58,15 @@ CONFIG = {
     'use_post_temporal_gat': False,  # FAILED: Test MAE 21.022, destabilized training
     'use_temporal_attention_head': False,  # FAILED: Test MAE 21.353, full-sequence access doesn't help
 
+    # Multi-scale temporal attention (experiment 3).
+    # Parallel local attention branch over the most recent `local_window` timesteps,
+    # fused with the global 24-step branch via a learned sigmoid gate.
+    # Motivation: pollution dynamics operate at multiple scales; the global branch may
+    # miss fine-grained recent patterns that a shorter attention window captures more sharply.
+    'use_multiscale_temporal': True,
+    'local_window': 6,       # number of recent timesteps for the local branch
+    'n_local_layers': 1,     # lighter local Transformer (1 layer vs 2 global)
+
     # t-24 daily anchor — FAILED: gate→0.073, wider val/test gap, Test MAE 21.193
     'use_t24_residual': False,
     'initial_t24_alpha': 0.3,
@@ -131,7 +140,7 @@ CONFIG = {
     # Adds a Gaussian weight peaking when the pollutant transit time d/(speed*3.6)
     # matches transport_h_ref hours, suppressing edges where transit time is a
     # poor match for the 6-hour forecast horizon.
-    'use_transport_time_weight': True,
+    'use_transport_time_weight': False,
     'transport_h_ref': 3.5,    # Reference transit time in hours (peak of Gaussian)
     'transport_sigma': 8.0,    # Width of the transit-time Gaussian (hours)
 
@@ -163,7 +172,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_transport',  # GraphTransformer + GATv1 + persistence residual + transport-time-weighted adj
+    'architecture_name': 'graph_transformer_gat_v1_residual_multiscale',  # GraphTransformer + GATv1 + persistence residual + multi-scale temporal (global+local)
     'hardware_tag': 'T4',       # Options: 'integrated_gpu', 'T4', 'rtx3090', etc.
     'use_versioned_checkpoint': True,       # If True, saves as <arch>_<hardware>_best.pt
 
@@ -991,6 +1000,9 @@ def train(config, trial=None):
             use_t24_residual=config.get('use_t24_residual', False),
             initial_t24_alpha=config.get('initial_t24_alpha', 0.3),
             future_met_dim=future_met_dim,
+            use_multiscale_temporal=config.get('use_multiscale_temporal', False),
+            local_window=config.get('local_window', 6),
+            n_local_layers=config.get('n_local_layers', 1),
         ).to(device)
         print(f"  Model type: GraphTransformerModel  graph_conv={config.get('graph_conv', 'gcn')}  gat_version={config.get('gat_version', 'v1')}  num_gat_layers={config.get('num_gat_layers', 1)}  post_gat={config.get('use_post_temporal_gat', False)}  temporal_attn_head={config.get('use_temporal_attention_head', False)}")
     else:
