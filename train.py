@@ -40,7 +40,7 @@ CONFIG = {
     'num_layers': 2,        # Number of Graph LSTM layers
     'num_heads': 4,         # Attention heads
     'dropout': 0.1,
-    'use_direct_decoding': True,  # Direct multi-horizon decoding (no autoregression)
+    'use_direct_decoding': False,  # Direct multi-horizon decoding (no autoregression)
     'use_attention': False,        # MHA tested and removed — zero measurable effect (2026-04-14)
 
     # Model type switch
