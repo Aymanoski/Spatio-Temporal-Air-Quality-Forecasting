@@ -614,6 +614,7 @@ class GraphTransformerModel(nn.Module):
         use_multiscale_temporal: bool = False,
         local_window: int = 6,
         n_local_layers: int = 1,
+        use_horizon_residual_weights: bool = False,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -623,6 +624,17 @@ class GraphTransformerModel(nn.Module):
         self.use_post_temporal_gat = use_post_temporal_gat
         self.use_temporal_attention_head = use_temporal_attention_head
         self.use_t24_residual = use_t24_residual
+        self.use_horizon_residual_weights = use_horizon_residual_weights
+
+        # Horizon-dependent residual weights: σ(logit_h) scales the persistence prior
+        # per horizon step. Initialized to logit(0.95) ≈ 2.94 so initial behavior
+        # matches the uniform residual (≈1.0). Learns to decay toward later horizons.
+        if use_horizon_residual_weights:
+            self.horizon_residual_logits = nn.Parameter(
+                torch.full((horizon,), 2.944)  # sigmoid(2.944) ≈ 0.95
+            )
+        else:
+            self.register_parameter("horizon_residual_logits", None)
 
         # Learnable gate for t-24 daily anchor.
         # prediction = model_delta + y_last + σ(t24_logit) * y_{t-24}
@@ -763,6 +775,12 @@ class GraphTransformerModel(nn.Module):
 
     def get_num_params(self) -> int:
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
+
+    def get_horizon_residual_weights(self):
+        """Return per-horizon persistence weights in [0, 1], shape (H,), or None if disabled."""
+        if not self.use_horizon_residual_weights or self.horizon_residual_logits is None:
+            return None
+        return torch.sigmoid(self.horizon_residual_logits)
 
     def get_wind_alpha(self):
         """Return current wind/distance mixing alpha in [0, 1], or None if not learnable."""
