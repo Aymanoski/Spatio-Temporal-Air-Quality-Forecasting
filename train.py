@@ -782,6 +782,9 @@ def train_epoch(model, train_loader, optimizer, criterion, adj, config, teacher_
         if met_forecaster is not None:
             with torch.no_grad():
                 Z_batch = met_forecaster(X_batch[:, :, :, met_cols], adj_batch)
+        elif config.get('met_forecast_mode') == 'persistence' and met_cols:
+            last_met = X_batch[:, -1:, :, :][:, :, :, met_cols]  # (B, 1, N, F_met)
+            Z_batch = last_met.expand(-1, config['horizon'], -1, -1).contiguous()
 
         # Forward pass
         predictions, _ = model(
@@ -866,6 +869,9 @@ def validate(model, val_loader, criterion, adj, config, target_scaler=None, met_
             # Generate predicted future met via frozen MeteorologicalForecaster
             if met_forecaster is not None:
                 Z_batch = met_forecaster(X_batch[:, :, :, met_cols], adj_batch)
+            elif config.get('met_forecast_mode') == 'persistence' and met_cols:
+                last_met = X_batch[:, -1:, :, :][:, :, :, met_cols]  # (B, 1, N, F_met)
+                Z_batch = last_met.expand(-1, config['horizon'], -1, -1).contiguous()
 
             # Forward pass (no teacher forcing)
             predictions, _ = model(
@@ -943,6 +949,9 @@ def compute_metrics(model, test_loader, adj, config, target_scaler=None, met_for
             # Generate predicted future met via frozen MeteorologicalForecaster
             if met_forecaster is not None:
                 Z_batch = met_forecaster(X_batch[:, :, :, met_cols], adj_batch)
+            elif config.get('met_forecast_mode') == 'persistence' and met_cols:
+                last_met = X_batch[:, -1:, :, :][:, :, :, met_cols]  # (B, 1, N, F_met)
+                Z_batch = last_met.expand(-1, config['horizon'], -1, -1).contiguous()
 
             predictions = model.predict(X_batch, adj_batch, horizon=config['horizon'],
                                         future_met=Z_batch)
@@ -1115,6 +1124,9 @@ def train(config, trial=None):
             config, device,
         )
         # Met forecaster is now frozen — PM2.5 DataLoader carries no Z
+        Z_dl_train = Z_dl_val = Z_dl_test = None
+    elif config.get('met_forecast_mode') == 'persistence':
+        # Persistence generates Z from X per batch — no need to carry oracle Z in DataLoader
         Z_dl_train = Z_dl_val = Z_dl_test = None
     else:
         Z_dl_train, Z_dl_val, Z_dl_test = Z_train_scaled, Z_val_scaled, Z_test_scaled
