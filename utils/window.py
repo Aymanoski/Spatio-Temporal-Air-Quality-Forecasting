@@ -1,12 +1,49 @@
 import numpy as np
 import argparse
 import os
+import joblib
 
 # Future meteorological feature indices (from the 33-feature space):
 # temp(6), pres(7), dewp(8), rain(9), wspm(10) + wind direction one-hot (17-32)
 # Excludes PM2.5 and co-pollutants (0-5) — those are what we predict / not forecastable.
 # Excludes temporal encodings (11-16) — deterministic from timestamp, not oracle info.
 FUTURE_MET_INDICES = [6, 7, 8, 9, 10] + list(range(17, 33))  # 21 features
+
+# Chinese New Year dates for the years covered by the Beijing dataset (2013-2017).
+# 2013 CNY (Feb 10) falls before data start (March 2013) so it is excluded.
+_CNY_DATES = ['2014-01-31', '2015-02-19', '2016-02-08', '2017-01-28']
+
+
+def compute_holiday_feature(timestamps):
+    """Binary indicator for high-emission Chinese holiday periods.
+
+    Marks three event types with strong PM2.5 anomalies:
+      - Spring Festival fireworks window: CNY eve + day + 3 days after (5 days)
+      - Golden Week (National Day):       Oct 1–7
+      - Labour Day:                       May 1–3
+
+    Args:
+        timestamps: list of timestamp strings (from metadata.save)
+
+    Returns:
+        (T,) float32 array, 1.0 on holiday hours, 0.0 otherwise
+    """
+    import pandas as pd
+
+    spring_festival = set()
+    for cny_str in _CNY_DATES:
+        cny = pd.Timestamp(cny_str)
+        for delta in range(-1, 4):  # eve, day, +3 days after
+            spring_festival.add((cny + pd.Timedelta(days=delta)).date())
+
+    result = np.zeros(len(timestamps), dtype=np.float32)
+    for i, ts in enumerate(timestamps):
+        dt = pd.Timestamp(ts)
+        if ((dt.month == 10 and 1 <= dt.day <= 7) or   # Golden Week
+                (dt.month == 5 and 1 <= dt.day <= 3) or    # Labour Day
+                dt.date() in spring_festival):              # Spring Festival
+            result[i] = 1.0
+    return result
 
 
 def create_windows(data, input_len=24, horizon=6, future_met_indices=None, add_pm25_delta=False):
@@ -49,11 +86,34 @@ if __name__ == "__main__":
                         help="Also extract future meteorological features (Z tensor)")
     parser.add_argument("--add_pm25_delta", action="store_true",
                         help="Insert PM2.5 first-difference as feature at index 17 (shifts wind one-hot to [18:34])")
+    parser.add_argument("--add_holiday", action="store_true",
+                        help="Insert Chinese holiday indicator as feature at index 17 (shifts wind one-hot to [18:34])")
     args = parser.parse_args()
+
+    if args.add_pm25_delta and args.add_holiday:
+        raise ValueError("--add_pm25_delta and --add_holiday cannot be used together (both insert at index 17).")
 
     tensor_path = os.path.join(args.data_path, "data_tensor.npy")
     data = np.load(tensor_path)
     print(f"Loaded data_tensor: {data.shape}")
+
+    # Insert holiday feature into the data tensor before windowing.
+    # Loads timestamps from metadata.save so preproccess.py does not need to be re-run.
+    if args.add_holiday:
+        meta_path = os.path.join(args.data_path, "metadata.save")
+        if not os.path.exists(meta_path):
+            raise FileNotFoundError(f"metadata.save not found at {meta_path}. Run preproccess.py first.")
+        metadata = joblib.load(meta_path)
+        timestamps = metadata["timestamps"]
+        assert len(timestamps) == len(data), (
+            f"Timestamp count ({len(timestamps)}) != data length ({len(data)})")
+        holiday = compute_holiday_feature(timestamps)  # (T,)
+        T, N, F = data.shape
+        holiday_3d = np.tile(holiday[:, np.newaxis, np.newaxis], (1, N, 1))  # (T, N, 1)
+        data = np.concatenate([data[:, :, :17], holiday_3d, data[:, :, 17:]], axis=2)
+        n_hol = int(holiday.sum())
+        print(f"Holiday feature inserted at index 17. New shape: {data.shape}")
+        print(f"Holiday hours: {n_hol} / {len(timestamps)} ({100*n_hol/len(timestamps):.1f}%)")
 
     future_met_indices = FUTURE_MET_INDICES if args.future_met else None
     result = create_windows(data, input_len=args.input_len, horizon=args.horizon,
@@ -68,7 +128,12 @@ if __name__ == "__main__":
     else:
         X, Y = result
 
-    suffix = "_delta" if args.add_pm25_delta else ""
+    if args.add_pm25_delta:
+        suffix = "_delta"
+    elif args.add_holiday:
+        suffix = "_holiday"
+    else:
+        suffix = ""
     x_path = os.path.join(args.data_path, f"X_{args.input_len}{suffix}.npy")
     y_path = os.path.join(args.data_path, f"Y_{args.input_len}{suffix}.npy")
     np.save(x_path, X)
@@ -76,5 +141,5 @@ if __name__ == "__main__":
 
     print(f"X shape: {X.shape}  -> saved to {x_path}")
     print(f"Y shape: {Y.shape}  -> saved to {y_path}")
-    if args.add_pm25_delta:
-        print("Delta feature inserted at index 17. Wind one-hot now at [18:34].")
+    if args.add_pm25_delta or args.add_holiday:
+        print("Extra feature inserted at index 17. Wind one-hot now at [18:34].")
