@@ -432,14 +432,20 @@ def prepare_checkpoint_config(checkpoint: dict[str, Any], device: str) -> dict[s
     config["use_physics_guided_adj"] = bool(checkpoint_config.get("use_physics_guided_adj", False))
     config["use_transport_time_weight"] = bool(checkpoint_config.get("use_transport_time_weight", False))
 
+    arch_name = str(
+        checkpoint_config.get("architecture_name")
+        or checkpoint.get("architecture", {}).get("name", "")
+    ).lower()
+
     if "use_persistence_residual" in checkpoint_config:
         config["use_persistence_residual"] = bool(checkpoint_config["use_persistence_residual"])
     else:
-        arch_name = str(
-            checkpoint_config.get("architecture_name")
-            or checkpoint.get("architecture", {}).get("name", "")
-        ).lower()
         config["use_persistence_residual"] = "residual" in arch_name
+
+    if "use_log_transform" in checkpoint_config:
+        config["use_log_transform"] = bool(checkpoint_config["use_log_transform"])
+    else:
+        config["use_log_transform"] = "log1p" in arch_name
 
     if "target_feature_idx" in checkpoint_config:
         config["target_feature_idx"] = int(checkpoint_config["target_feature_idx"])
@@ -591,7 +597,8 @@ def run_model_predictions(
 def inverse_transform_predictions(
     predictions: np.ndarray,
     targets: np.ndarray,
-    target_scaler: Any | None
+    target_scaler: Any | None,
+    use_log_transform: bool = False,
 ) -> tuple[np.ndarray, np.ndarray, bool]:
     if target_scaler is None:
         return predictions, targets, False
@@ -599,6 +606,12 @@ def inverse_transform_predictions(
     orig_shape = predictions.shape
     predictions_inv = target_scaler.inverse_transform(predictions.reshape(-1, 1)).reshape(orig_shape)
     targets_inv = target_scaler.inverse_transform(targets.reshape(-1, 1)).reshape(targets.shape)
+
+    # Keep evaluator semantics aligned with train.py compute_metrics/validate.
+    if use_log_transform:
+        predictions_inv = np.expm1(predictions_inv)
+        targets_inv = np.expm1(targets_inv)
+
     return predictions_inv, targets_inv, True
 
 
@@ -656,6 +669,7 @@ def evaluate_checkpoint(
         predictions_scaled,
         Y_test_scaled,
         target_scaler,
+        use_log_transform=bool(config.get("use_log_transform", False)),
     )
 
     metadata = load_processed_metadata(data_path)
@@ -711,6 +725,7 @@ def evaluate_checkpoint(
             "wind_temporal_graph_window": config.get("wind_temporal_graph_window"),
             "use_persistence_residual": config.get("use_persistence_residual", False),
             "target_feature_idx": config.get("target_feature_idx", 0),
+            "use_log_transform": config.get("use_log_transform", False),
             "loss_type": config.get("loss_type"),
         },
         "load_info": load_info,

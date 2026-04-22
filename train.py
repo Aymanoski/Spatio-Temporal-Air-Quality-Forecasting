@@ -107,14 +107,12 @@ CONFIG = {
     # Replaces uniform +y_last with a per-step scaled version. Initialized near 1.0.
     'use_horizon_residual_weights': False,
 
-    # Log1p target transform: apply log1p to PM2.5 (X[:,  :, :, 0] and Y) before MinMaxScaling.
-    # Motivation: PM2.5 is right-skewed (mean≈85, std≈92, max≈835 µg/m³). MinMaxScaling
-    # a log-normal distribution compresses the dense low range and stretches the tail, which
-    # distorts gradients. Log1p makes the distribution more symmetric, reducing the dominance
-    # of rare extreme events in the loss and improving average MAE.
-    # Inverse: expm1 is applied after inverse_transform in validate() and compute_metrics().
-    # The persistence residual remains consistent because PM2.5 in X is transformed identically.
+    # Log1p input/target transform. Applied to right-skewed features before MinMaxScaling.
+    # PM2.5 (idx 0): target + input. Inverse expm1 applied after inverse_transform in metrics.
+    # Pollutants (idx 1-5: PM10, SO2, NO2, CO, O3): input only, no inverse needed.
+    # All have CV > 0.68; CO reaches 10,000 µg/m³. Same reasoning as PM2.5.
     'use_log_transform': True,
+    'log_transform_indices': [0, 1, 2, 3, 4, 5],  # feature indices in X to apply log1p
 
     # Training
     'batch_size': 32,
@@ -198,7 +196,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p',  # GraphTransformer + GATv1 + persistence residual + log1p target transform
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all',  # GraphTransformer + GATv1 + persistence residual + log1p on PM2.5+pollutants
     'hardware_tag': 'T4',       # Options: 'integrated_gpu', 'T4', 'rtx3090', etc.
     'use_versioned_checkpoint': True,       # If True, saves as <arch>_<hardware>_best.pt
 
@@ -557,11 +555,11 @@ def fit_scalers_on_train(X_train, Y_train, config):
         print("    2. cd utils && python window.py")
         return None, None, True
 
-    # Apply log1p to PM2.5 before fitting scalers if requested.
-    # Only PM2.5 (index 0) is transformed; other features retain their original scale.
+    # Apply log1p to skewed input features and PM2.5 target before fitting scalers.
     if config.get('use_log_transform', False):
         X_train_fit = X_train.copy()
-        X_train_fit[:, :, :, 0] = np.log1p(X_train[:, :, :, 0])
+        for idx in config.get('log_transform_indices', [0]):
+            X_train_fit[:, :, :, idx] = np.log1p(X_train[:, :, :, idx])
         Y_train_fit = np.log1p(Y_train)
     else:
         X_train_fit = X_train
@@ -600,10 +598,11 @@ def scale_data(X, Y, feature_scaler, target_scaler, config):
     n_samples, seq_len, n_nodes, n_features = X.shape
     wind_start_idx = config.get('wind_dir_start_idx', 17)
 
-    # Apply log1p to PM2.5 (index 0) before scaling — must match fit_scalers_on_train.
+    # Apply log1p to skewed input features — must match fit_scalers_on_train.
     if config.get('use_log_transform', False):
         X_to_scale = X.copy()
-        X_to_scale[:, :, :, 0] = np.log1p(X[:, :, :, 0])
+        for idx in config.get('log_transform_indices', [0]):
+            X_to_scale[:, :, :, idx] = np.log1p(X[:, :, :, idx])
         Y_to_scale = np.log1p(Y)
     else:
         X_to_scale = X
