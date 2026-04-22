@@ -196,7 +196,15 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std',  # GraphTransformer + GATv1 + persistence residual + log1p + StandardScaler
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_perstation',  # GraphTransformer + GATv1 + persistence residual + log1p + StandardScaler + per-station norm
+
+    # Per-station target normalization.
+    # Fits one StandardScaler per station on Y (PM2.5 targets) instead of a single global scaler.
+    # Removes inter-station distribution shift: every station looks N(0,1) to the loss.
+    # Risk: loses inter-station relative magnitude signal (GAT currently uses this).
+    # When True, the persistence residual y_last is space-converted from global feature
+    # space to the corresponding per-station target space before addition.
+    'use_per_station_norm': True,
     'hardware_tag': 'T4',       # Options: 'integrated_gpu', 'T4', 'rtx3090', etc.
     'use_versioned_checkpoint': True,       # If True, saves as <arch>_<hardware>_best.pt
 
@@ -517,6 +525,22 @@ def split_data(X, Y, config):
     return (X_train, Y_train), (X_val, Y_val), (X_test, Y_test)
 
 
+def inverse_transform_targets(arr, target_scaler):
+    """
+    Inverse-transform targets.
+    target_scaler: single scaler (global) or list of per-station scalers.
+    arr shape: (samples, horizon, nodes).
+    """
+    if isinstance(target_scaler, list):
+        out = np.zeros_like(arr)
+        for s in range(arr.shape[-1]):
+            flat = arr[..., s].reshape(-1, 1)
+            out[..., s] = target_scaler[s].inverse_transform(flat).reshape(arr[..., s].shape)
+        return out
+    orig_shape = arr.shape
+    return target_scaler.inverse_transform(arr.reshape(-1, 1)).reshape(orig_shape)
+
+
 def fit_scalers_on_train(X_train, Y_train, config):
     """
     Fit scalers on training data only to prevent data leakage.
@@ -573,10 +597,21 @@ def fit_scalers_on_train(X_train, Y_train, config):
     feature_scaler = StandardScaler()
     feature_scaler.fit(X_flat[:, :wind_start_idx])
 
-    # Fit target scaler on Y values (PM2.5 only)
-    Y_flat = Y_train_fit.reshape(-1, 1)
-    target_scaler = StandardScaler()
-    target_scaler.fit(Y_flat)
+    # Fit target scaler(s) on Y values (PM2.5 only)
+    if config.get('use_per_station_norm', False):
+        target_scaler = []
+        for s in range(n_nodes):
+            sc = StandardScaler()
+            sc.fit(Y_train_fit[:, :, s].reshape(-1, 1))
+            target_scaler.append(sc)
+        means = [sc.mean_[0] for sc in target_scaler]
+        stds  = [sc.scale_[0] for sc in target_scaler]
+        print(f"  Per-station target scalers: mean range [{min(means):.4f}, {max(means):.4f}]  "
+              f"std range [{min(stds):.4f}, {max(stds):.4f}]")
+    else:
+        Y_flat = Y_train_fit.reshape(-1, 1)
+        target_scaler = StandardScaler()
+        target_scaler.fit(Y_flat)
 
     return feature_scaler, target_scaler, False
 
@@ -619,10 +654,17 @@ def scale_data(X, Y, feature_scaler, target_scaler, config):
     ], axis=1)
     X_scaled = X_scaled_flat.reshape(n_samples, seq_len, n_nodes, n_features)
 
-    # Scale targets
-    Y_flat = Y_to_scale.reshape(-1, 1)
-    Y_scaled_flat = target_scaler.transform(Y_flat)
-    Y_scaled = Y_scaled_flat.reshape(Y.shape)
+    # Scale targets — per-station or global
+    if isinstance(target_scaler, list):
+        n_s, h_s, n_n = Y_to_scale.shape
+        Y_scaled = np.zeros_like(Y_to_scale)
+        for s in range(n_n):
+            Y_scaled[:, :, s] = target_scaler[s].transform(
+                Y_to_scale[:, :, s].reshape(-1, 1)
+            ).reshape(n_s, h_s)
+    else:
+        Y_flat = Y_to_scale.reshape(-1, 1)
+        Y_scaled = target_scaler.transform(Y_flat).reshape(Y.shape)
 
     return X_scaled.astype(np.float32), Y_scaled.astype(np.float32)
 
@@ -834,7 +876,11 @@ def train_epoch(model, train_loader, optimizer, criterion, adj, config, teacher_
         # Add the baseline so loss is computed on final predictions vs actual targets.
         if config.get('use_persistence_residual', False):
             feat_idx = config.get('target_feature_idx', 0)
-            y_last = X_batch[:, -1, :, feat_idx]           # (B, N)
+            y_last = X_batch[:, -1, :, feat_idx]           # (B, N) in global feature space
+            if config.get('use_per_station_norm', False):
+                # Convert: undo global feature standardization, apply per-station target standardization
+                y_last = (y_last * config['_feat_pm25_scale'] + config['_feat_pm25_mean']
+                          - config['_target_means']) / config['_target_scales']
             prior = y_last.unsqueeze(1).expand_as(predictions)  # (B, H, N)
             if config.get('use_horizon_residual_weights', False):
                 hw = model.get_horizon_residual_weights().view(1, -1, 1)  # (1, H, 1)
@@ -922,6 +968,9 @@ def validate(model, val_loader, criterion, adj, config, target_scaler=None, met_
             if config.get('use_persistence_residual', False):
                 feat_idx = config.get('target_feature_idx', 0)
                 y_last = X_batch[:, -1, :, feat_idx]
+                if config.get('use_per_station_norm', False):
+                    y_last = (y_last * config['_feat_pm25_scale'] + config['_feat_pm25_mean']
+                              - config['_target_means']) / config['_target_scales']
                 prior = y_last.unsqueeze(1).expand_as(predictions)
                 if config.get('use_horizon_residual_weights', False):
                     hw = model.get_horizon_residual_weights().view(1, -1, 1)
@@ -947,9 +996,8 @@ def validate(model, val_loader, criterion, adj, config, target_scaler=None, met_
 
     # Compute MAE in original scale for early stopping (loss-function-independent)
     if target_scaler is not None:
-        orig_shape = preds.shape
-        preds_inv = target_scaler.inverse_transform(preds.reshape(-1, 1)).reshape(orig_shape)
-        targets_inv = target_scaler.inverse_transform(targets.reshape(-1, 1)).reshape(orig_shape)
+        preds_inv = inverse_transform_targets(preds, target_scaler)
+        targets_inv = inverse_transform_targets(targets, target_scaler)
         if config.get('use_log_transform', False):
             preds_inv = np.expm1(preds_inv)
             targets_inv = np.expm1(targets_inv)
@@ -1000,7 +1048,10 @@ def compute_metrics(model, test_loader, adj, config, target_scaler=None, met_for
 
             # Persistence residual: add last observed PM2.5 to model delta output
             if use_residual:
-                y_last = X_batch[:, -1, :, feat_idx]                   # (B, N)
+                y_last = X_batch[:, -1, :, feat_idx]                   # (B, N) in global feature space
+                if config.get('use_per_station_norm', False):
+                    y_last = (y_last * config['_feat_pm25_scale'] + config['_feat_pm25_mean']
+                              - config['_target_means']) / config['_target_scales']
                 prior = y_last.unsqueeze(1).expand_as(predictions)
                 if config.get('use_horizon_residual_weights', False):
                     hw = model.get_horizon_residual_weights().view(1, -1, 1)
@@ -1022,10 +1073,8 @@ def compute_metrics(model, test_loader, adj, config, target_scaler=None, met_for
     
     # Inverse transform if scaler provided
     if target_scaler is not None:
-        # Reshape for inverse transform
-        orig_shape = preds.shape
-        preds = target_scaler.inverse_transform(preds.reshape(-1, 1)).reshape(orig_shape)
-        targets = target_scaler.inverse_transform(targets.reshape(-1, 1)).reshape(orig_shape)
+        preds = inverse_transform_targets(preds, target_scaler)
+        targets = inverse_transform_targets(targets, target_scaler)
         if config.get('use_log_transform', False):
             preds = np.expm1(preds)
             targets = np.expm1(targets)
@@ -1129,12 +1178,25 @@ def train(config, trial=None):
             Z_train_scaled = Z_val_scaled = Z_test_scaled = None
 
         print(f"  Feature scaler mean[:3]: {feature_scaler.mean_[:3]}  std[:3]: {feature_scaler.scale_[:3]}")
-        print(f"  Target scaler mean: {target_scaler.mean_[0]:.4f}  std: {target_scaler.scale_[0]:.4f}")
+        if isinstance(target_scaler, list):
+            means = [sc.mean_[0] for sc in target_scaler]
+            stds  = [sc.scale_[0] for sc in target_scaler]
+            print(f"  Target scalers (per-station): mean [{min(means):.4f}, {max(means):.4f}]  "
+                  f"std [{min(stds):.4f}, {max(stds):.4f}]")
+        else:
+            print(f"  Target scaler mean: {target_scaler.mean_[0]:.4f}  std: {target_scaler.scale_[0]:.4f}")
 
         # Save scalers for inference
         os.makedirs(config['data_path'], exist_ok=True)
         joblib.dump(target_scaler, os.path.join(config['data_path'], 'target_scaler.save'))
         joblib.dump(feature_scaler, os.path.join(config['data_path'], 'feature_scaler.save'))
+
+        # Pre-compute residual conversion tensors for per-station norm (used in train/val/test loops)
+        if config.get('use_per_station_norm', False):
+            config['_feat_pm25_mean']  = torch.tensor(float(feature_scaler.mean_[0]),  dtype=torch.float32, device=device)
+            config['_feat_pm25_scale'] = torch.tensor(float(feature_scaler.scale_[0]), dtype=torch.float32, device=device)
+            config['_target_means']  = torch.tensor([sc.mean_[0]  for sc in target_scaler], dtype=torch.float32, device=device)
+            config['_target_scales'] = torch.tensor([sc.scale_[0] for sc in target_scaler], dtype=torch.float32, device=device)
 
     # Derive EVT threshold from SCALED training targets to match loss computation
     if config.get('evt_threshold') is None:
