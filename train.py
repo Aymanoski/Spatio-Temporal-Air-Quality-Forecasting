@@ -13,7 +13,7 @@ import os
 import time
 import random
 import joblib
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from models import GCNLSTMModel, GraphTransformerModel, MeteorologicalForecaster
 from utils.graph import (
     build_wind_aware_adjacency_batch,
@@ -196,7 +196,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all',  # GraphTransformer + GATv1 + persistence residual + log1p on PM2.5+pollutants
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std',  # GraphTransformer + GATv1 + persistence residual + log1p + StandardScaler
     'hardware_tag': 'T4',       # Options: 'integrated_gpu', 'T4', 'rtx3090', etc.
     'use_versioned_checkpoint': True,       # If True, saves as <arch>_<hardware>_best.pt
 
@@ -570,12 +570,12 @@ def fit_scalers_on_train(X_train, Y_train, config):
 
     # Fit feature scaler on non-wind features (indices 0 to wind_start_idx)
     # This includes PM2.5 (idx 0), other pollutants, meteo, and temporal features
-    feature_scaler = MinMaxScaler()
+    feature_scaler = StandardScaler()
     feature_scaler.fit(X_flat[:, :wind_start_idx])
 
     # Fit target scaler on Y values (PM2.5 only)
     Y_flat = Y_train_fit.reshape(-1, 1)
-    target_scaler = MinMaxScaler()
+    target_scaler = StandardScaler()
     target_scaler.fit(Y_flat)
 
     return feature_scaler, target_scaler, False
@@ -953,6 +953,7 @@ def validate(model, val_loader, criterion, adj, config, target_scaler=None, met_
         if config.get('use_log_transform', False):
             preds_inv = np.expm1(preds_inv)
             targets_inv = np.expm1(targets_inv)
+            preds_inv = np.clip(preds_inv, 0, None)
         val_mae = float(np.mean(np.abs(preds_inv - targets_inv)))
     else:
         val_mae = float(np.mean(np.abs(preds - targets)))
@@ -1028,7 +1029,8 @@ def compute_metrics(model, test_loader, adj, config, target_scaler=None, met_for
         if config.get('use_log_transform', False):
             preds = np.expm1(preds)
             targets = np.expm1(targets)
-    
+            preds = np.clip(preds, 0, None)
+
     # Compute metrics
     mse = np.mean((preds - targets) ** 2)
     rmse = np.sqrt(mse)
@@ -1126,8 +1128,8 @@ def train(config, trial=None):
         else:
             Z_train_scaled = Z_val_scaled = Z_test_scaled = None
 
-        print(f"  Feature scaler range: {feature_scaler.data_min_[:3]}... to {feature_scaler.data_max_[:3]}...")
-        print(f"  Target scaler range: [{target_scaler.data_min_[0]:.2f}, {target_scaler.data_max_[0]:.2f}]")
+        print(f"  Feature scaler mean[:3]: {feature_scaler.mean_[:3]}  std[:3]: {feature_scaler.scale_[:3]}")
+        print(f"  Target scaler mean: {target_scaler.mean_[0]:.4f}  std: {target_scaler.scale_[0]:.4f}")
 
         # Save scalers for inference
         os.makedirs(config['data_path'], exist_ok=True)
