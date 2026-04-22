@@ -105,7 +105,16 @@ CONFIG = {
     'target_feature_idx': 0,  # Index of PM2.5 in the feature dimension of X
     # Horizon-dependent residual weights: learned σ(logit_h) per horizon step.
     # Replaces uniform +y_last with a per-step scaled version. Initialized near 1.0.
-    'use_horizon_residual_weights': True,
+    'use_horizon_residual_weights': False,
+
+    # Log1p target transform: apply log1p to PM2.5 (X[:,  :, :, 0] and Y) before MinMaxScaling.
+    # Motivation: PM2.5 is right-skewed (mean≈85, std≈92, max≈835 µg/m³). MinMaxScaling
+    # a log-normal distribution compresses the dense low range and stretches the tail, which
+    # distorts gradients. Log1p makes the distribution more symmetric, reducing the dominance
+    # of rare extreme events in the loss and improving average MAE.
+    # Inverse: expm1 is applied after inverse_transform in validate() and compute_metrics().
+    # The persistence residual remains consistent because PM2.5 in X is transformed identically.
+    'use_log_transform': True,
 
     # Training
     'batch_size': 32,
@@ -189,7 +198,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_hwres',  # GraphTransformer + GATv1 + horizon-weighted persistence residual
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p',  # GraphTransformer + GATv1 + persistence residual + log1p target transform
     'hardware_tag': 'T4',       # Options: 'integrated_gpu', 'T4', 'rtx3090', etc.
     'use_versioned_checkpoint': True,       # If True, saves as <arch>_<hardware>_best.pt
 
@@ -548,8 +557,18 @@ def fit_scalers_on_train(X_train, Y_train, config):
         print("    2. cd utils && python window.py")
         return None, None, True
 
+    # Apply log1p to PM2.5 before fitting scalers if requested.
+    # Only PM2.5 (index 0) is transformed; other features retain their original scale.
+    if config.get('use_log_transform', False):
+        X_train_fit = X_train.copy()
+        X_train_fit[:, :, :, 0] = np.log1p(X_train[:, :, :, 0])
+        Y_train_fit = np.log1p(Y_train)
+    else:
+        X_train_fit = X_train
+        Y_train_fit = Y_train
+
     # Flatten X for fitting: (samples * seq_len * nodes, features)
-    X_flat = X_train.reshape(-1, n_features)
+    X_flat = X_train_fit.reshape(-1, n_features)
 
     # Fit feature scaler on non-wind features (indices 0 to wind_start_idx)
     # This includes PM2.5 (idx 0), other pollutants, meteo, and temporal features
@@ -557,7 +576,7 @@ def fit_scalers_on_train(X_train, Y_train, config):
     feature_scaler.fit(X_flat[:, :wind_start_idx])
 
     # Fit target scaler on Y values (PM2.5 only)
-    Y_flat = Y_train.reshape(-1, 1)
+    Y_flat = Y_train_fit.reshape(-1, 1)
     target_scaler = MinMaxScaler()
     target_scaler.fit(Y_flat)
 
@@ -581,8 +600,17 @@ def scale_data(X, Y, feature_scaler, target_scaler, config):
     n_samples, seq_len, n_nodes, n_features = X.shape
     wind_start_idx = config.get('wind_dir_start_idx', 17)
 
+    # Apply log1p to PM2.5 (index 0) before scaling — must match fit_scalers_on_train.
+    if config.get('use_log_transform', False):
+        X_to_scale = X.copy()
+        X_to_scale[:, :, :, 0] = np.log1p(X[:, :, :, 0])
+        Y_to_scale = np.log1p(Y)
+    else:
+        X_to_scale = X
+        Y_to_scale = Y
+
     # Scale features
-    X_flat = X.reshape(-1, n_features)
+    X_flat = X_to_scale.reshape(-1, n_features)
     X_scaled_features = feature_scaler.transform(X_flat[:, :wind_start_idx])
 
     # Reconstruct X with scaled features + unscaled wind one-hot
@@ -593,7 +621,7 @@ def scale_data(X, Y, feature_scaler, target_scaler, config):
     X_scaled = X_scaled_flat.reshape(n_samples, seq_len, n_nodes, n_features)
 
     # Scale targets
-    Y_flat = Y.reshape(-1, 1)
+    Y_flat = Y_to_scale.reshape(-1, 1)
     Y_scaled_flat = target_scaler.transform(Y_flat)
     Y_scaled = Y_scaled_flat.reshape(Y.shape)
 
@@ -923,6 +951,9 @@ def validate(model, val_loader, criterion, adj, config, target_scaler=None, met_
         orig_shape = preds.shape
         preds_inv = target_scaler.inverse_transform(preds.reshape(-1, 1)).reshape(orig_shape)
         targets_inv = target_scaler.inverse_transform(targets.reshape(-1, 1)).reshape(orig_shape)
+        if config.get('use_log_transform', False):
+            preds_inv = np.expm1(preds_inv)
+            targets_inv = np.expm1(targets_inv)
         val_mae = float(np.mean(np.abs(preds_inv - targets_inv)))
     else:
         val_mae = float(np.mean(np.abs(preds - targets)))
@@ -995,6 +1026,9 @@ def compute_metrics(model, test_loader, adj, config, target_scaler=None, met_for
         orig_shape = preds.shape
         preds = target_scaler.inverse_transform(preds.reshape(-1, 1)).reshape(orig_shape)
         targets = target_scaler.inverse_transform(targets.reshape(-1, 1)).reshape(orig_shape)
+        if config.get('use_log_transform', False):
+            preds = np.expm1(preds)
+            targets = np.expm1(targets)
     
     # Compute metrics
     mse = np.mean((preds - targets) ** 2)
