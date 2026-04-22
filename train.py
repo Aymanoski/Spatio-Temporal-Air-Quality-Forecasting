@@ -112,7 +112,7 @@ CONFIG = {
     # Pollutants (idx 1-5: PM10, SO2, NO2, CO, O3): input only, no inverse needed.
     # All have CV > 0.68; CO reaches 10,000 µg/m³. Same reasoning as PM2.5.
     'use_log_transform': True,
-    'log_transform_indices': [0, 1, 2, 3, 4, 5],  # feature indices in X to apply log1p
+    'log_transform_indices': [0, 1, 2, 3, 4, 5, 9],  # feature indices in X to apply log1p; 9=rain
 
     # Training
     'batch_size': 32,
@@ -196,15 +196,12 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_perstation',  # GraphTransformer + GATv1 + persistence residual + log1p + StandardScaler + per-station norm
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_rain_std',  # GraphTransformer + GATv1 + persistence residual + log1p + rain + StandardScaler
 
-    # Per-station target normalization.
-    # Fits one StandardScaler per station on Y (PM2.5 targets) instead of a single global scaler.
-    # Removes inter-station distribution shift: every station looks N(0,1) to the loss.
-    # Risk: loses inter-station relative magnitude signal (GAT currently uses this).
-    # When True, the persistence residual y_last is space-converted from global feature
-    # space to the corresponding per-station target space before addition.
-    'use_per_station_norm': True,
+    # Per-station target normalization (TRIED AND REJECTED 2026-04-22).
+    # Complete statistical tie with global StdScaler — no measurable gain.
+    # Global StdScaler is preferred (simpler, marginally better RMSE).
+    'use_per_station_norm': False,
     'hardware_tag': 'T4',       # Options: 'integrated_gpu', 'T4', 'rtx3090', etc.
     'use_versioned_checkpoint': True,       # If True, saves as <arch>_<hardware>_best.pt
 
