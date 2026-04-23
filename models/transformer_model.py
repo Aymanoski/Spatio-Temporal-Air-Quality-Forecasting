@@ -101,7 +101,7 @@ class SpatioTemporalTransformerEncoder(nn.Module):
         self.use_multiscale_temporal = use_multiscale_temporal
 
         if ffn_dim is None:
-            ffn_dim = hidden_dim * 4  # standard Transformer ratio
+            ffn_dim = hidden_dim * 2  # compact: 2× hidden, not the usual 4×
 
         # --- Input projection ---
         self.input_proj = nn.Linear(input_dim, hidden_dim)
