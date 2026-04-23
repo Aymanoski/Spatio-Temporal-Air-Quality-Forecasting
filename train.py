@@ -213,12 +213,21 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_cosine_s42',  # cosine annealing with warmup
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_noise',  # + Gaussian noise augmentation
 
-    # LR schedule: cosine annealing with linear warmup (replaces ReduceLROnPlateau)
-    'use_cosine_schedule': True,
-    'cosine_warmup_epochs': 5,      # linear warmup for first N epochs
-    'cosine_min_lr_ratio': 0.05,    # final LR = lr * min_lr_ratio (don't decay to zero)
+    # Gaussian noise augmentation: add N(0, noise_std) to continuous input features
+    # during training only. Wind one-hot (indices wind_dir_start_idx:) left unperturbed.
+    # Features are StandardScaler-normalized (mean=0, std≈1), so noise_std=0.02 is ~2%
+    # of a standard deviation — small enough to preserve signal, enough to regularize.
+    'use_noise_augmentation': True,
+    'noise_std': 0.02,
+
+    # LR schedule: cosine annealing with linear warmup (TRIED AND REJECTED 2026-04-23:
+    # worse than ReduceLROnPlateau on this dataset — decays LR regardless of improvement,
+    # model best at epoch 7 then stagnated. ReduceLROnPlateau holds LR until needed.)
+    'use_cosine_schedule': False,
+    'cosine_warmup_epochs': 5,
+    'cosine_min_lr_ratio': 0.05,
 
     # Per-station target normalization (TRIED AND REJECTED 2026-04-22).
     # Complete statistical tie with global StdScaler — no measurable gain.
@@ -866,6 +875,15 @@ def train_epoch(model, train_loader, optimizer, criterion, adj, config, teacher_
         X_batch = batch[0].to(device)
         Y_batch = batch[1].to(device)
         Z_batch = batch[2].to(device) if len(batch) > 2 else None
+
+        # Gaussian noise augmentation: perturb continuous features only (not wind one-hot).
+        # Applied in training only — validate() and compute_metrics() never call this path.
+        if config.get('use_noise_augmentation', False):
+            wind_start = config.get('wind_dir_start_idx', 17)
+            X_batch = X_batch.clone()
+            X_batch[:, :, :, :wind_start] += (
+                torch.randn_like(X_batch[:, :, :, :wind_start]) * config.get('noise_std', 0.02)
+            )
 
         optimizer.zero_grad()
 
