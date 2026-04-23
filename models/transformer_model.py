@@ -31,10 +31,12 @@ Design rationale:
 """
 
 import math
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from .layers import GraphAttentionLayer
+from utils.graph import STATIONS, haversine
 
 
 class TemporalPositionalEncoding(nn.Module):
@@ -615,6 +617,8 @@ class GraphTransformerModel(nn.Module):
         local_window: int = 6,
         n_local_layers: int = 1,
         use_horizon_residual_weights: bool = False,
+        use_learnable_static_adj: bool = False,
+        initial_distance_sigma: float = 1800.0,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -625,6 +629,7 @@ class GraphTransformerModel(nn.Module):
         self.use_temporal_attention_head = use_temporal_attention_head
         self.use_t24_residual = use_t24_residual
         self.use_horizon_residual_weights = use_horizon_residual_weights
+        self.use_learnable_static_adj = use_learnable_static_adj
 
         # Horizon-dependent residual weights: σ(logit_h) scales the persistence prior
         # per horizon step. Initialized to logit(0.95) ≈ 2.94 so initial behavior
@@ -664,6 +669,27 @@ class GraphTransformerModel(nn.Module):
             )
         else:
             self.register_parameter("alpha_logit", None)
+
+        # Learnable static adjacency: N×N parameter initialized from Gaussian distance decay.
+        # Replaces the precomputed A_dist as the (1-alpha) static component.
+        # Off-diagonal entries are parameterized as sigmoid(logit); diagonal is fixed to 1.0.
+        if use_learnable_static_adj:
+            station_names = list(STATIONS.keys())
+            n = len(station_names)
+            dist_matrix = np.zeros((n, n), dtype=np.float32)
+            for i in range(n):
+                for j in range(n):
+                    if i != j:
+                        dist_matrix[i, j] = haversine(
+                            STATIONS[station_names[i]], STATIONS[station_names[j]]
+                        )
+            dist_decay = np.exp(-dist_matrix ** 2 / initial_distance_sigma)
+            np.fill_diagonal(dist_decay, 0.0)  # diagonal handled separately as self-loop
+            dist_decay_clipped = np.clip(dist_decay, 0.01, 0.99)
+            logit_init = torch.logit(torch.from_numpy(dist_decay_clipped))
+            self.static_adj_logits = nn.Parameter(logit_init)
+        else:
+            self.register_parameter("static_adj_logits", None)
 
         self.encoder = SpatioTemporalTransformerEncoder(
             input_dim=input_dim,
@@ -787,6 +813,19 @@ class GraphTransformerModel(nn.Module):
         if not self.use_learnable_alpha_gate or self.alpha_logit is None:
             return None
         return torch.sigmoid(self.alpha_logit)
+
+    def get_static_adj(self):
+        """Return row-normalized learnable static adjacency (N, N), or None if disabled.
+        Off-diagonal entries are sigmoid(logits); diagonal is fixed at 1.0 before normalization."""
+        if not self.use_learnable_static_adj or self.static_adj_logits is None:
+            return None
+        N = self.num_nodes
+        device = self.static_adj_logits.device
+        raw = torch.sigmoid(self.static_adj_logits)          # (N, N), all in (0, 1)
+        mask = 1 - torch.eye(N, device=device)
+        A = raw * mask + torch.eye(N, device=device)         # fix self-loops to 1.0
+        row_sum = A.sum(dim=-1, keepdim=True).clamp(min=1e-8)
+        return A / row_sum                                   # (N, N), row-normalized
 
     def get_t24_alpha(self):
         """Return current t-24 residual gate in [0, 1], or None if not enabled."""

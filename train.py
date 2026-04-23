@@ -213,12 +213,17 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_corrAdj',  # + correlation-based adjacency
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_learnAdj',  # + learnable static adjacency
 
-    # Correlation-based static adjacency: replaces Gaussian distance decay with
-    # Pearson correlation of training PM2.5 across stations (clipped to [0,1] +
-    # row-normalised). Wind component (alpha * A_wind) is unchanged.
-    'use_correlation_adj': True,
+    # Learnable static adjacency: replaces precomputed Gaussian distance decay with a
+    # learnable (N,N) parameter initialized from the same decay. Trained end-to-end.
+    # Off-diagonal entries: sigmoid(logits). Diagonal fixed at 1.0. Row-normalized.
+    'use_learnable_static_adj': True,
+
+    # Correlation-based static adjacency (TRIED AND REJECTED 2026-04-23):
+    # test MAE 19.831 vs baseline 19.813 — statistical tie. Alpha collapsed 0.33→0.21
+    # due to scale mismatch (corr_norm pre-normalized vs A_dist unnormalized).
+    'use_correlation_adj': False,
 
     # Gaussian noise augmentation (TRIED AND REJECTED 2026-04-23):
     # std=0.02 → test MAE 19.927 vs baseline 19.813. Val unchanged (18.23) but test worse.
@@ -488,7 +493,8 @@ def extract_wind_features(X_batch, config):
     return wind_speeds, wind_directions
 
 
-def build_dynamic_adjacency(X_batch, config, device, alpha_override=None, sigma_override=None):
+def build_dynamic_adjacency(X_batch, config, device, alpha_override=None, sigma_override=None,
+                            static_adj_override=None):
     """
     Build dynamic wind-aware adjacency matrix (or sequence) for a batch.
     Uses GPU-optimized computation when possible.
@@ -499,6 +505,7 @@ def build_dynamic_adjacency(X_batch, config, device, alpha_override=None, sigma_
         device: torch device
         alpha_override: learnable alpha tensor from model.get_wind_alpha() — keeps grad flow
         sigma_override: learnable sigma tensor from model.get_distance_sigma() — keeps grad flow
+        static_adj_override: (N, N) learnable static adjacency from model.get_static_adj() — keeps grad flow
 
     Returns:
         adj_batch: (batch, num_nodes, num_nodes)            when use_per_timestep_adj=False
@@ -513,13 +520,14 @@ def build_dynamic_adjacency(X_batch, config, device, alpha_override=None, sigma_
             sigma_override=sigma_override,
         )
 
-    # Use the torch implementation whenever either parameter is learnable so
+    # Use the torch implementation whenever any learnable param is provided so
     # gradients can flow from the loss back through the adjacency construction.
-    if X_batch.is_cuda or alpha_override is not None or sigma_override is not None:
+    if X_batch.is_cuda or alpha_override is not None or sigma_override is not None or static_adj_override is not None:
         return build_dynamic_adjacency_gpu(
             X_batch, config,
             alpha_override=alpha_override,
-            sigma_override=sigma_override
+            sigma_override=sigma_override,
+            static_adj_override=static_adj_override,
         )
 
     # Fallback to CPU version for non-GPU tensors
@@ -894,7 +902,9 @@ def train_epoch(model, train_loader, optimizer, criterion, adj, config, teacher_
         # Build dynamic adjacency if enabled
         if use_wind_adj:
             alpha_override = model.get_wind_alpha()
-            adj_batch = build_dynamic_adjacency(X_batch, config, device, alpha_override=alpha_override)
+            static_adj_override = model.get_static_adj() if getattr(model, 'use_learnable_static_adj', False) else None
+            adj_batch = build_dynamic_adjacency(X_batch, config, device, alpha_override=alpha_override,
+                                               static_adj_override=static_adj_override)
         else:
             adj_batch = adj
 
@@ -989,7 +999,9 @@ def validate(model, val_loader, criterion, adj, config, target_scaler=None, met_
             # Build dynamic adjacency if enabled
             if use_wind_adj:
                 alpha_override = model.get_wind_alpha()
-                adj_batch = build_dynamic_adjacency(X_batch, config, device, alpha_override=alpha_override)
+                static_adj_override = model.get_static_adj() if getattr(model, 'use_learnable_static_adj', False) else None
+                adj_batch = build_dynamic_adjacency(X_batch, config, device, alpha_override=alpha_override,
+                                                   static_adj_override=static_adj_override)
             else:
                 adj_batch = adj
 
@@ -1080,7 +1092,9 @@ def compute_metrics(model, test_loader, adj, config, target_scaler=None, met_for
             # Build dynamic adjacency if enabled
             if use_wind_adj:
                 alpha_override = model.get_wind_alpha()
-                adj_batch = build_dynamic_adjacency(X_batch, config, device, alpha_override=alpha_override)
+                static_adj_override = model.get_static_adj() if getattr(model, 'use_learnable_static_adj', False) else None
+                adj_batch = build_dynamic_adjacency(X_batch, config, device, alpha_override=alpha_override,
+                                                   static_adj_override=static_adj_override)
             else:
                 adj_batch = adj
 
@@ -1349,6 +1363,8 @@ def train(config, trial=None):
             local_window=config.get('local_window', 6),
             n_local_layers=config.get('n_local_layers', 1),
             use_horizon_residual_weights=config.get('use_horizon_residual_weights', False),
+            use_learnable_static_adj=config.get('use_learnable_static_adj', False),
+            initial_distance_sigma=config.get('distance_sigma', 1800.0),
         ).to(device)
         print(f"  Model type: GraphTransformerModel  graph_conv={config.get('graph_conv', 'gcn')}  gat_version={config.get('gat_version', 'v1')}  num_gat_layers={config.get('num_gat_layers', 1)}  post_gat={config.get('use_post_temporal_gat', False)}  temporal_attn_head={config.get('use_temporal_attention_head', False)}")
     else:

@@ -854,7 +854,8 @@ def build_physics_guided_adjacency_gpu(
     return A / row_sum
 
 
-def build_dynamic_adjacency_gpu(X_batch, config, alpha_override=None, sigma_override=None):
+def build_dynamic_adjacency_gpu(X_batch, config, alpha_override=None, sigma_override=None,
+                                static_adj_override=None):
     """
     Build dynamic wind-aware adjacency on GPU (no CPU transfer).
 
@@ -865,6 +866,8 @@ def build_dynamic_adjacency_gpu(X_batch, config, alpha_override=None, sigma_over
                         Pass model.get_distance_sigma() to allow gradient flow into alpha.
         sigma_override: If provided (scalar tensor or float), overrides config['distance_sigma'].
                         Pass model.get_distance_sigma() to allow gradient flow into sigma.
+        static_adj_override: If provided (N, N) tensor, used as the static base component
+                        instead of A_dist or config['_corr_adj']. Gradients flow through.
 
     Returns:
         adj_batch: (batch, num_nodes, num_nodes) tensor ON GPU
@@ -902,6 +905,7 @@ def build_dynamic_adjacency_gpu(X_batch, config, alpha_override=None, sigma_over
             plume_tau=config.get('plume_tau', 4.0),
         )
     else:
+        corr_dist = static_adj_override if static_adj_override is not None else config.get('_corr_adj', None)
         adj_batch = build_wind_aware_adjacency_gpu(
             agg_speeds,
             agg_angles,
@@ -911,7 +915,7 @@ def build_dynamic_adjacency_gpu(X_batch, config, alpha_override=None, sigma_over
             use_transport_time_weight=config.get('use_transport_time_weight', False),
             transport_h_ref=config.get('transport_h_ref', 3.5),
             transport_sigma=config.get('transport_sigma', 8.0),
-            corr_dist=config.get('_corr_adj', None),
+            corr_dist=corr_dist,
         )
 
     return adj_batch
