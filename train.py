@@ -213,13 +213,17 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_noise',  # + Gaussian noise augmentation
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_corrAdj',  # + correlation-based adjacency
 
-    # Gaussian noise augmentation: add N(0, noise_std) to continuous input features
-    # during training only. Wind one-hot (indices wind_dir_start_idx:) left unperturbed.
-    # Features are StandardScaler-normalized (mean=0, std≈1), so noise_std=0.02 is ~2%
-    # of a standard deviation — small enough to preserve signal, enough to regularize.
-    'use_noise_augmentation': True,
+    # Correlation-based static adjacency: replaces Gaussian distance decay with
+    # Pearson correlation of training PM2.5 across stations (clipped to [0,1] +
+    # row-normalised). Wind component (alpha * A_wind) is unchanged.
+    'use_correlation_adj': True,
+
+    # Gaussian noise augmentation (TRIED AND REJECTED 2026-04-23):
+    # std=0.02 → test MAE 19.927 vs baseline 19.813. Val unchanged (18.23) but test worse.
+    # Noise degraded signal without improving generalization.
+    'use_noise_augmentation': False,
     'noise_std': 0.02,
 
     # LR schedule: cosine annealing with linear warmup (TRIED AND REJECTED 2026-04-23:
@@ -1193,6 +1197,21 @@ def train(config, trial=None):
         print(f"  Z split: train={len(Z_train)}, val={len(Z_val)}, test={len(Z_test)}")
     else:
         Z_train = Z_val = Z_test = None
+
+    # Correlation-based static adjacency: computed from raw training PM2.5 (no leakage).
+    # Replaces Gaussian distance decay as the static component; wind component unchanged.
+    if config.get('use_correlation_adj', False):
+        N = config['num_nodes']
+        pm25_flat = X_train[:, :, :, 0].reshape(-1, N)          # (samples*seq_len, N)
+        corr = np.corrcoef(pm25_flat.T).astype(np.float32)       # (N, N)
+        corr = np.clip(corr, 0, None)                            # drop negative correlations
+        row_sum = corr.sum(axis=1, keepdims=True)
+        row_sum[row_sum == 0] = 1.0
+        corr_norm = corr / row_sum                               # row-normalised
+        config['_corr_adj'] = torch.FloatTensor(corr_norm).to(device)
+        off_diag = (corr.sum() - np.trace(corr)) / (N * (N - 1))
+        print(f"  Correlation adjacency built: mean off-diag={off_diag:.4f}  "
+              f"range=[{corr.min():.3f}, {corr.max():.3f}]")
 
     # Fit scalers on training data only (prevents data leakage)
     print("\n[3/6] Fitting scalers on training data only...")

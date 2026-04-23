@@ -556,6 +556,7 @@ def build_wind_aware_adjacency_gpu(
     use_transport_time_weight=False,
     transport_h_ref=3.5,
     transport_sigma=8.0,
+    corr_dist=None,
 ):
     """
     GPU-optimized wind-aware adjacency with bidirectional alignment.
@@ -658,7 +659,9 @@ def build_wind_aware_adjacency_gpu(
     else:
         alpha = alpha.to(device=device, dtype=wind_speeds.dtype)
 
-    A = (1 - alpha) * A_dist.unsqueeze(0) + alpha * A_wind  # (batch, N, N)
+    # Use correlation adjacency as static component when provided (replaces distance).
+    A_base = corr_dist if corr_dist is not None else A_dist
+    A = (1 - alpha) * A_base.unsqueeze(0) + alpha * A_wind  # (batch, N, N)
 
     # Row normalization
     row_sum = A.sum(dim=-1, keepdim=True).clamp(min=1e-8)
@@ -908,6 +911,7 @@ def build_dynamic_adjacency_gpu(X_batch, config, alpha_override=None, sigma_over
             use_transport_time_weight=config.get('use_transport_time_weight', False),
             transport_h_ref=config.get('transport_h_ref', 3.5),
             transport_sigma=config.get('transport_sigma', 8.0),
+            corr_dist=config.get('_corr_adj', None),
         )
 
     return adj_batch
