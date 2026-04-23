@@ -1,5 +1,5 @@
 """
-Optuna hyperparameter tuning for the GCN-LSTM model.
+Optuna hyperparameter tuning for the current forecasting architecture.
 
 Usage examples:
   python optuna_tune.py --trials 30
@@ -39,11 +39,17 @@ def build_trial_config(trial, args):
     config["weight_decay"] = trial.suggest_float("weight_decay", 1e-7, 5e-4, log=True)
     config["batch_size"] = trial.suggest_categorical("batch_size", [32, 64])
     config["hidden_dim"] = trial.suggest_categorical("hidden_dim", [64, 96])
-    config["num_layers"] = trial.suggest_int("num_layers", 1, 2)
     config["dropout"] = trial.suggest_float("dropout", 0.0, 0.3)
 
-    # Optional: teacher forcing schedule for sequence stability
-    config["teacher_forcing_end"] = trial.suggest_float("teacher_forcing_end", 0.0, 0.25)
+    if config.get("model_type") == "graph_transformer":
+        config["num_tf_layers"] = trial.suggest_int("num_tf_layers", 1, 3)
+        config["num_heads"] = trial.suggest_categorical("num_heads", [4, 8])
+        if config.get("graph_conv") == "gat":
+            config["num_gat_layers"] = trial.suggest_int("num_gat_layers", 1, 2)
+    else:
+        config["num_layers"] = trial.suggest_int("num_layers", 1, 2)
+        # Teacher forcing only affects the autoregressive GCN-LSTM path.
+        config["teacher_forcing_end"] = trial.suggest_float("teacher_forcing_end", 0.0, 0.25)
 
     # Tune wind-physics parameters for dynamic adjacency (single-stage search)
     if config.get("use_wind_adjacency", False):
@@ -113,7 +119,7 @@ def objective_factory(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Optuna tuning for GCN-LSTM")
+    parser = argparse.ArgumentParser(description="Optuna tuning for the current forecasting model")
     parser.add_argument("--trials", type=int, default=60, help="Number of Optuna trials")
     parser.add_argument("--epochs", type=int, default=45, help="Max epochs per trial")
     parser.add_argument("--patience", type=int, default=10, help="Early stopping patience per trial")
@@ -153,6 +159,8 @@ def main():
     print(f"Epochs/trial: {args.epochs}")
     print(f"Patience/trial: {args.patience}")
     print(f"Search seed: {args.seed}")
+    print(f"Model type: {CONFIG.get('model_type')}")
+    print(f"Graph conv: {CONFIG.get('graph_conv')}")
     print("Tune wind physics: True (always enabled)")
     print("=" * 80)
 
@@ -168,7 +176,7 @@ def main():
     print("\n" + "=" * 80)
     print("BEST TRIAL")
     print("=" * 80)
-    print(f"Best value (val_loss): {study.best_value:.6f}")
+    print(f"Best value (val_mae): {study.best_value:.6f}")
     print("Best params:")
     for key, value in study.best_trial.params.items():
         print(f"  {key}: {value}")

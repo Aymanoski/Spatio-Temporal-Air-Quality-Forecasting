@@ -12,12 +12,19 @@ from train import train, CONFIG
 # Version Configurations
 # ============================================================================
 
+LEGACY_BASE_CONFIG = {
+    **CONFIG,
+    'optimizer_type': 'adam',
+    'log_transform_indices': [0, 1, 2, 3, 4, 5],
+    'evt_base_loss_type': 'mse',
+}
+
 VERSION_CONFIGS = {
     'v1_baseline': {
         'name': 'Version 1: Baseline',
         'description': 'Autoregressive decoder + MSE loss + static adjacency',
         'config': {
-            **CONFIG,
+            **LEGACY_BASE_CONFIG,
             'use_wind_adjacency': False,
             'loss_type': 'mse',
             'use_direct_decoding': False,
@@ -32,7 +39,7 @@ VERSION_CONFIGS = {
         'name': 'Version 2: + Direct Decoding',
         'description': 'Direct multi-horizon decoder (no autoregression)',
         'config': {
-            **CONFIG,
+            **LEGACY_BASE_CONFIG,
             'use_wind_adjacency': False,
             'loss_type': 'mse',
             'use_direct_decoding': True,  # NEW: Direct decoding
@@ -47,7 +54,7 @@ VERSION_CONFIGS = {
         'name': 'Version 3: + EVT Hybrid Loss',
         'description': 'Direct decoding + EVT loss (extreme value awareness)',
         'config': {
-            **CONFIG,
+            **LEGACY_BASE_CONFIG,
             'use_wind_adjacency': False,
             'loss_type': 'evt_hybrid',  # NEW: EVT loss
             'use_direct_decoding': True,
@@ -65,7 +72,7 @@ VERSION_CONFIGS = {
         'name': 'Version 4: + Wind-Aware Adjacency',
         'description': 'Direct decoding + EVT + dynamic wind-aware graphs',
         'config': {
-            **CONFIG,
+            **LEGACY_BASE_CONFIG,
             'use_wind_adjacency': True,  # NEW: Wind adjacency
             'loss_type': 'evt_hybrid',
             'use_direct_decoding': True,
@@ -83,7 +90,7 @@ VERSION_CONFIGS = {
         'name': 'Version 5: Full + Adaptive Tuning',
         'description': 'All features + adaptive EVT lambda schedule',
         'config': {
-            **CONFIG,
+            **LEGACY_BASE_CONFIG,
             'use_wind_adjacency': True,
             'loss_type': 'evt_hybrid',
             'use_direct_decoding': True,

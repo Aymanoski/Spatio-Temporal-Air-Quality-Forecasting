@@ -108,24 +108,27 @@ CONFIG = {
     # Replaces uniform +y_last with a per-step scaled version. Initialized near 1.0.
     'use_horizon_residual_weights': False,
 
-    # Log1p input/target transform. Applied to right-skewed features before MinMaxScaling.
+    # Log1p input/target transform. Applied to right-skewed features before StandardScaling.
     # PM2.5 (idx 0): target + input. Inverse expm1 applied after inverse_transform in metrics.
     # Pollutants (idx 1-5: PM10, SO2, NO2, CO, O3): input only, no inverse needed.
-    # All have CV > 0.68; CO reaches 10,000 µg/m³. Same reasoning as PM2.5.
+    # Wind speed (idx 10: wspm): input only, right-skewed and non-negative.
     'use_log_transform': True,
-    'log_transform_indices': [0, 1, 2, 3, 4, 5],  # feature indices in X to apply log1p
+    'log_transform_indices': [0, 1, 2, 3, 4, 5, 10],  # feature indices in X to apply log1p
 
     # Training
     'batch_size': 32,
     'learning_rate': 1e-3,
     'weight_decay': 1e-5,
+    'optimizer_type': 'adamw',  # AdamW matches Transformer training better than Adam+L2
     'epochs': 100,
     'patience': 15,          # Early stopping patience (back to original)
     'teacher_forcing_start': 1.0,  # Initial teacher forcing ratio
     'teacher_forcing_end': 0.0,    # Final teacher forcing ratio
 
     # Loss
-    'loss_type': 'evt_hybrid',     # Options: 'mse' or 'evt_hybrid'
+    'loss_type': 'evt_hybrid',     # Options: 'mse', 'huber', or 'evt_hybrid'
+    'evt_base_loss_type': 'huber', # Base regression loss used inside EVT hybrid ('mse'|'huber')
+    'huber_delta': 1.0,            # SmoothL1 beta in normalized target space
     'evt_lambda': 0.05,            # Base weight of EVT tail component (used if no schedule)
     'evt_tail_quantile': 0.90,     # Threshold quantile for extremes
     'evt_xi': 0.10,                # GPD shape parameter
@@ -213,12 +216,12 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_learnAdj',  # + learnable static adjacency
+    'architecture_name': 'graph_transformer_gat_v1_residual_evt_huber_adamw_log1p_wspm_std',
 
-    # Learnable static adjacency: replaces precomputed Gaussian distance decay with a
-    # learnable (N,N) parameter initialized from the same decay. Trained end-to-end.
-    # Off-diagonal entries: sigmoid(logits). Diagonal fixed at 1.0. Row-normalized.
-    'use_learnable_static_adj': True,
+    # Learnable static adjacency (TRIED AND REJECTED 2026-04-23):
+    # test MAE 19.836 vs baseline 19.813 — statistical tie. Alpha collapsed 0.62→0.21.
+    # Fixed Gaussian distance decay is already near-optimal; 144 params found no better prior.
+    'use_learnable_static_adj': False,
 
     # Correlation-based static adjacency (TRIED AND REJECTED 2026-04-23):
     # test MAE 19.831 vs baseline 19.813 — statistical tie. Alpha collapsed 0.33→0.21
@@ -259,9 +262,65 @@ CONFIG = {
 }
 
 
+def compute_base_regression_loss(predictions, targets, loss_type='mse', huber_delta=1.0,
+                                 horizon_weights=None):
+    """
+    Compute the primary regression loss in normalized space.
+
+    Supports plain MSE or Huber/SmoothL1, with optional per-horizon reweighting.
+    """
+    if loss_type == 'mse':
+        per_element = (predictions - targets) ** 2
+    elif loss_type == 'huber':
+        per_element = F.smooth_l1_loss(
+            predictions,
+            targets,
+            beta=float(huber_delta),
+            reduction='none',
+        )
+    else:
+        raise ValueError(f"Unsupported base loss_type: {loss_type}")
+
+    if horizon_weights is not None:
+        horizon_weights = horizon_weights.to(device=predictions.device, dtype=predictions.dtype)
+        horizon_count = predictions.shape[1]
+        weight_shape = [1] * per_element.ndim
+        weight_shape[1] = horizon_count
+        per_element = per_element * horizon_weights[:horizon_count].view(*weight_shape)
+
+    return per_element.mean()
+
+
+class BaseForecastLoss(nn.Module):
+    """Primary regression loss used for training in normalized space."""
+
+    def __init__(self, loss_type='mse', huber_delta=1.0, horizon_weights=None):
+        super().__init__()
+        self.loss_type = str(loss_type).lower()
+        self.huber_delta = float(huber_delta)
+        if self.loss_type == 'huber' and self.huber_delta <= 0:
+            raise ValueError("huber_delta must be > 0 for Huber loss")
+
+        if horizon_weights is not None:
+            hw = torch.as_tensor(horizon_weights, dtype=torch.float32)
+            hw = hw / hw.mean()   # normalize: preserves overall loss scale
+            self.register_buffer("horizon_weights", hw)
+        else:
+            self.register_buffer("horizon_weights", None)
+
+    def forward(self, predictions, targets):
+        return compute_base_regression_loss(
+            predictions,
+            targets,
+            loss_type=self.loss_type,
+            huber_delta=self.huber_delta,
+            horizon_weights=self.horizon_weights,
+        )
+
+
 class EVTHybridLoss(nn.Module):
     """
-    Hybrid loss: standard MSE + EVT tail-aware penalty.
+    Hybrid loss: primary regression loss (MSE or Huber) + EVT tail-aware penalty.
 
     Penalizes errors more heavily for extreme values above the threshold.
     Uses a power-law penalty inspired by GPD to emphasize extreme value errors.
@@ -273,7 +332,7 @@ class EVTHybridLoss(nn.Module):
 
     def __init__(self, threshold, lambda_tail=0.05, xi=0.10, eps=1e-6,
                  asymmetric_penalty=False, under_penalty_multiplier=2.0,
-                 horizon_weights=None):
+                 horizon_weights=None, base_loss_type='mse', huber_delta=1.0):
         super().__init__()
         # threshold can be a float (global) or a 1D array-like (per node).
         thr = torch.as_tensor(threshold, dtype=torch.float32)
@@ -283,30 +342,20 @@ class EVTHybridLoss(nn.Module):
         self.eps = float(eps)
         self.asymmetric_penalty = asymmetric_penalty
         self.under_penalty_multiplier = float(under_penalty_multiplier)
-
-        # Per-horizon loss weights: (H,) tensor, normalized so mean == 1.
-        # Upweighting later horizons pushes the model to prioritize H4-H6.
-        # Applied only to the base MSE; tail loss is left unweighted (lambda=0.05).
-        if horizon_weights is not None:
-            hw = torch.as_tensor(horizon_weights, dtype=torch.float32)
-            hw = hw / hw.mean()   # normalize: preserves overall loss scale
-            self.register_buffer("horizon_weights", hw)
-        else:
-            self.register_buffer("horizon_weights", None)
+        self.base_loss = BaseForecastLoss(
+            loss_type=base_loss_type,
+            huber_delta=huber_delta,
+            horizon_weights=horizon_weights,
+        )
 
     def set_lambda(self, new_lambda):
         """Update lambda weight (for adaptive scheduling)."""
         self.lambda_tail = float(new_lambda)
 
     def forward(self, predictions, targets):
-        # Base MSE — optionally weighted per horizon.
+        # Base regression loss — optionally weighted per horizon.
         # predictions/targets: (B, H, N)
-        if self.horizon_weights is not None:
-            H = predictions.shape[1]
-            w = self.horizon_weights[:H].to(predictions.device).view(1, -1, 1)
-            mse = ((predictions - targets) ** 2 * w).mean()
-        else:
-            mse = F.mse_loss(predictions, targets)
+        base_loss = self.base_loss(predictions, targets)
 
         # Identify extreme values (above threshold)
         thr = self.threshold.to(device=targets.device, dtype=targets.dtype)
@@ -350,8 +399,25 @@ class EVTHybridLoss(nn.Module):
         else:
             tail_loss = torch.zeros(1, device=predictions.device, dtype=predictions.dtype)
 
-        # Combine MSE + weighted tail penalty
-        return mse + self.lambda_tail * tail_loss
+        # Combine primary regression loss + weighted tail penalty
+        return base_loss + self.lambda_tail * tail_loss
+
+
+def create_optimizer(parameters, config, lr=None, weight_decay=None, optimizer_type=None):
+    """Create the configured optimizer."""
+    optimizer_name = str(optimizer_type or config.get('optimizer_type', 'adam')).lower()
+    lr_value = float(config['learning_rate'] if lr is None else lr)
+    weight_decay_value = (
+        float(config.get('weight_decay', 0.0))
+        if weight_decay is None else float(weight_decay)
+    )
+
+    if optimizer_name == 'adamw':
+        return optim.AdamW(parameters, lr=lr_value, weight_decay=weight_decay_value)
+    if optimizer_name == 'adam':
+        return optim.Adam(parameters, lr=lr_value, weight_decay=weight_decay_value)
+
+    raise ValueError(f"Unsupported optimizer_type: {optimizer_name}")
 
 
 def get_evt_lambda_for_epoch(epoch, schedule_config, total_epochs):
@@ -733,6 +799,14 @@ def scale_future_met(Z, feature_scaler, config):
     n_scaler_cols = feature_scaler.n_features_in_   # 17
     dummy = np.zeros((len(Z_flat), n_scaler_cols), dtype=np.float32)
     dummy[:, 6:11] = Z_flat[:, :5]                  # temp, pres, dewp, rain, wspm
+
+    # Keep future met scaling aligned with X scaling when any of these original
+    # feature columns use log1p (notably wspm at feature index 10).
+    if config.get('use_log_transform', False):
+        for idx in config.get('log_transform_indices', [0]):
+            if 0 <= idx < n_scaler_cols:
+                dummy[:, idx] = np.log1p(dummy[:, idx])
+
     dummy_scaled = feature_scaler.transform(dummy)
 
     # Reconstruct scaled Z: scaled met features + unchanged wind direction one-hot
@@ -812,7 +886,12 @@ def pretrain_met_forecaster(met_forecaster, X_train_scaled, Z_train_scaled,
     va_loader = DataLoader(_make_met_ds(X_val_scaled, Z_val_scaled),
                            batch_size=bs, shuffle=False)
 
-    optimizer = torch.optim.Adam(met_forecaster.parameters(), lr=1e-3)
+    optimizer = create_optimizer(
+        met_forecaster.parameters(),
+        config,
+        lr=config.get('met_learning_rate', 1e-3),
+        weight_decay=config.get('met_weight_decay', config.get('weight_decay', 0.0)),
+    )
     best_val  = float('inf')
     best_state = None
     stale      = 0
@@ -1389,20 +1468,27 @@ def train(config, trial=None):
         print(f"  Learnable Alpha Gate: ON (initial alpha={config.get('wind_alpha', 0.6):.3f})")
     
     # Loss and optimizer
-    if config.get('loss_type', 'mse') == 'evt_hybrid':
+    loss_type = str(config.get('loss_type', 'mse')).lower()
+    horizon_weights = config.get('horizon_loss_weights', None)
+    huber_delta = float(config.get('huber_delta', 1.0))
+
+    if loss_type == 'evt_hybrid':
         # Determine initial lambda (may be adjusted by schedule)
         if config.get('evt_use_lambda_schedule', False):
             initial_lambda = config['evt_lambda_schedule']['initial']
         else:
             initial_lambda = config['evt_lambda']
 
+        base_loss_type = str(config.get('evt_base_loss_type', 'mse')).lower()
         criterion = EVTHybridLoss(
             threshold=config['evt_threshold'],
             lambda_tail=initial_lambda,
             xi=config['evt_xi'],
             asymmetric_penalty=config.get('evt_asymmetric_penalty', False),
             under_penalty_multiplier=config.get('evt_under_penalty_multiplier', 2.0),
-            horizon_weights=config.get('horizon_loss_weights', None),
+            horizon_weights=horizon_weights,
+            base_loss_type=base_loss_type,
+            huber_delta=huber_delta,
         )
 
         # Print configuration
@@ -1413,11 +1499,12 @@ def train(config, trial=None):
         else:
             thr_str = f"{float(thr):.4f}"
         print(
-            f"  Loss: EVT Hybrid (lambda={initial_lambda}, "
+            f"  Loss: EVT Hybrid (base={base_loss_type}, "
+            f"delta={huber_delta:.3f}, lambda={initial_lambda}, "
             f"q={config['evt_tail_quantile']}, xi={config['evt_xi']}, "
             f"threshold={thr_str})"
         )
-        hw = config.get('horizon_loss_weights', None)
+        hw = horizon_weights
         if hw is not None:
             import numpy as _np
             hw_arr = _np.array(hw, dtype=float)
@@ -1435,15 +1522,27 @@ def train(config, trial=None):
                 f"  Adaptive Lambda Schedule: {sched['initial']} -> {sched['mid']} -> {sched['final']} "
                 f"(warmup={sched['warmup_epochs']}, mid={sched['mid_epochs']}, {sched['transition']})"
             )
-    else:
-        criterion = nn.MSELoss()
-        print("  Loss: MSE")
+    elif loss_type in {'mse', 'huber'}:
+        criterion = BaseForecastLoss(
+            loss_type=loss_type,
+            huber_delta=huber_delta,
+            horizon_weights=horizon_weights,
+        )
+        if loss_type == 'huber':
+            print(f"  Loss: Huber (delta={huber_delta:.3f})")
+        else:
+            print("  Loss: MSE")
 
-    optimizer = optim.Adam(
-        model.parameters(),
-        lr=config['learning_rate'],
-        weight_decay=config['weight_decay']
-    )
+        if horizon_weights is not None:
+            import numpy as _np
+            hw_arr = _np.array(horizon_weights, dtype=float)
+            hw_norm = hw_arr / hw_arr.mean()
+            print(f"  Horizon weights (normalized): {[round(w, 3) for w in hw_norm.tolist()]}")
+    else:
+        raise ValueError(f"Unsupported loss_type: {loss_type}")
+
+    optimizer = create_optimizer(model.parameters(), config)
+    print(f"  Optimizer: {str(config.get('optimizer_type', 'adam')).upper()}")
     
     # Learning rate scheduler: cosine annealing with linear warmup, or ReduceLROnPlateau
     if config.get('use_cosine_schedule', False):
