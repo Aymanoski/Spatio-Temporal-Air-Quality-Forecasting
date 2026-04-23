@@ -3,6 +3,7 @@ Training script for GCN-LSTM Encoder-Decoder model.
 Air quality (PM2.5) forecasting using spatio-temporal graph neural networks.
 """
 
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -212,7 +213,12 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_lrmae',  # GraphTransformer + GATv1 + persistence residual + log1p + StandardScaler + LR on val_mae
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_cosine_s42',  # cosine annealing with warmup
+
+    # LR schedule: cosine annealing with linear warmup (replaces ReduceLROnPlateau)
+    'use_cosine_schedule': True,
+    'cosine_warmup_epochs': 5,      # linear warmup for first N epochs
+    'cosine_min_lr_ratio': 0.05,    # final LR = lr * min_lr_ratio (don't decay to zero)
 
     # Per-station target normalization (TRIED AND REJECTED 2026-04-22).
     # Complete statistical tie with global StdScaler — no measurable gain.
@@ -1386,10 +1392,21 @@ def train(config, trial=None):
         weight_decay=config['weight_decay']
     )
     
-    # Learning rate scheduler
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.5, patience=5
-    )
+    # Learning rate scheduler: cosine annealing with linear warmup, or ReduceLROnPlateau
+    if config.get('use_cosine_schedule', False):
+        warmup = config.get('cosine_warmup_epochs', 5)
+        total  = config['epochs']
+        eta_min_ratio = config.get('cosine_min_lr_ratio', 0.05)
+        def _cosine_lr_lambda(epoch):
+            if epoch < warmup:
+                return float(epoch + 1) / warmup
+            progress = (epoch - warmup) / max(total - warmup, 1)
+            return eta_min_ratio + (1.0 - eta_min_ratio) * 0.5 * (1.0 + math.cos(math.pi * progress))
+        scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=_cosine_lr_lambda)
+    else:
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode='min', factor=0.5, patience=5
+        )
     
     # Training loop
     print("\n[5/6] Training...")
@@ -1468,10 +1485,11 @@ def train(config, trial=None):
         val_loss, val_mae = validate(model, val_loader, criterion, adj, config, target_scaler,
                                      met_forecaster=met_forecaster)
 
-        # LR scheduler tracks val_mae (loss-function-independent).
-        # val_loss fluctuates with EVT batch composition even when the model improves,
-        # causing spurious LR reductions. val_mae is a stable, metric-aligned signal.
-        scheduler.step(val_mae)
+        # Step LR scheduler — cosine uses epoch count, ReduceLROnPlateau uses val_mae.
+        if config.get('use_cosine_schedule', False):
+            scheduler.step()
+        else:
+            scheduler.step(val_mae)
 
         # Record history
         history['train_loss'].append(train_loss)
