@@ -242,7 +242,7 @@ CONFIG = {
     # residual_window=1 → current behavior (last observed value).
     # residual_window=k → mean of last k timesteps used as prior.
     # Try: 3, 6, 12 in separate runs.
-    'residual_window': 6,
+    'residual_window': 3,
 
     # Exp 6: Soft regime conditioning.
     # Injects last PM2.5 (normalized) directly into enc_out before the head via
