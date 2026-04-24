@@ -218,7 +218,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_regime',
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_revin',
 
     # Multi-task auxiliary prediction — TRIED AND REJECTED 2026-04-24:
     # lambda=0.1 → test MAE 20.200, RMSE 38.157. Smaller lambda also failed.
@@ -282,6 +282,14 @@ CONFIG = {
     # Complete statistical tie with global StdScaler — no measurable gain.
     # Global StdScaler is preferred (simpler, marginally better RMSE).
     'use_per_station_norm': False,
+    # RevIN: per-instance normalization across the 24h input window.
+    # Normalizes PM2.5 (and optionally co-pollutants) per (sample, node) before the model
+    # forward pass, then reverses the normalization on predictions before the loss.
+    # Targets the persistent val/test gap (~1.6 MAE) attributed to distribution shift.
+    # Watch: alpha gate — RevIN changes per-instance gradient scale; if alpha < 0.15, it has destabilized.
+    'use_revin': True,
+    'revin_feature_indices': [0],  # PM2.5 only to minimize alpha-gate interaction risk
+
     'hardware_tag': 'T4',       # Options: 'integrated_gpu', 'T4', 'rtx3090', etc.
     'use_versioned_checkpoint': True,       # If True, saves as <arch>_<hardware>_best.pt
 
@@ -438,6 +446,51 @@ class EVTHybridLoss(nn.Module):
 
         # Combine primary regression loss + weighted tail penalty
         return base_loss + self.lambda_tail * tail_loss
+
+
+class RevIN:
+    """
+    Per-instance reversible normalization across the T=24 time steps.
+
+    Applied to selected features of X_batch before the model forward pass.
+    Statistics are per (sample, node), computed across the input sequence.
+    Call normalize() before forward, denormalize() after to recover
+    predictions in the original (log1p + StdScaler) space.
+
+    Only feature_indices[0] (PM2.5) is used for denormalization because
+    the model output is a single PM2.5 scalar per horizon step.
+    """
+
+    def __init__(self, feature_indices=(0,), eps=1e-5):
+        self.feature_indices = list(feature_indices)
+        self.eps = eps
+        self._mean = None  # (B, 1, N, len_f), updated by normalize()
+        self._std  = None  # (B, 1, N, len_f), updated by normalize()
+
+    def normalize(self, x):
+        """Return a RevIN-normalized clone of x and store per-instance stats.
+        Args:
+            x: (B, T, N, F) float tensor
+        Returns:
+            x_normed: (B, T, N, F) with feature_indices instance-normalized
+        """
+        subset = x[:, :, :, self.feature_indices]           # (B, T, N, len_f)
+        self._mean = subset.mean(dim=1, keepdim=True)       # (B, 1, N, len_f)
+        self._std  = subset.std(dim=1, keepdim=True).clamp(min=self.eps)
+        x_normed = x.clone()
+        x_normed[:, :, :, self.feature_indices] = (subset - self._mean) / self._std
+        return x_normed
+
+    def denormalize(self, preds):
+        """Reverse instance normalization on PM2.5 predictions.
+        Args:
+            preds: (B, H, N) float tensor in RevIN space
+        Returns:
+            (B, H, N) in log1p + StdScaler space
+        """
+        mean = self._mean[:, 0, :, 0]  # (B, N) — PM2.5 stats from last normalize()
+        std  = self._std[:,  0, :, 0]  # (B, N)
+        return preds * std.unsqueeze(1) + mean.unsqueeze(1)  # (B, H, N)
 
 
 def create_optimizer(parameters, config, lr=None, weight_decay=None, optimizer_type=None):
@@ -1048,6 +1101,8 @@ def train_epoch(model, train_loader, optimizer, criterion, adj, config, teacher_
     # Y_aux batch position: 3 if Z also present, else 2
     y_aux_batch_idx = 3 if use_future_met else 2
 
+    revin = RevIN(config.get('revin_feature_indices', [0])) if config.get('use_revin', False) else None
+
     for batch_idx, batch in enumerate(train_loader):
         X_batch = batch[0].to(device)
         Y_batch = batch[1].to(device)
@@ -1082,9 +1137,14 @@ def train_epoch(model, train_loader, optimizer, criterion, adj, config, teacher_
             last_met = X_batch[:, -1:, :, :][:, :, :, met_cols]  # (B, 1, N, F_met)
             Z_batch = last_met.expand(-1, config['horizon'], -1, -1).contiguous()
 
+        # RevIN: normalize PM2.5 channel per instance before model forward.
+        # Adjacency builder reads wspm (index 10) and wind one-hot (17-33) — both
+        # unchanged by RevIN on index 0 — so X_batch is still correct for adjacency.
+        X_input = revin.normalize(X_batch) if revin is not None else X_batch
+
         # Forward pass
         out = model(
-            x=X_batch,
+            x=X_input,
             adj=adj_batch,
             target=Y_batch,
             horizon=config['horizon'],
@@ -1100,18 +1160,19 @@ def train_epoch(model, train_loader, optimizer, criterion, adj, config, teacher_
 
         # Persistence residual: model outputs delta from last observed PM2.5.
         # Add the baseline so loss is computed on final predictions vs actual targets.
+        # y_last is extracted from X_input so it is in the same space as model output.
         if config.get('use_persistence_residual', False):
             feat_idx = config.get('target_feature_idx', 0)
             rw = config.get('residual_window', 1)
-            y_last = (X_batch[:, -rw:, :, feat_idx].mean(dim=1) if rw > 1
-                      else X_batch[:, -1, :, feat_idx])    # (B, N) in global feature space
+            y_last = (X_input[:, -rw:, :, feat_idx].mean(dim=1) if rw > 1
+                      else X_input[:, -1, :, feat_idx])    # (B, N) in RevIN/feature space
             if config.get('use_per_station_norm', False):
                 y_last = (y_last * config['_feat_pm25_scale'] + config['_feat_pm25_mean']
                           - config['_target_means']) / config['_target_scales']
             if config.get('use_trend_residual', False):
-                slope = (X_batch[:, -1, :, feat_idx] - X_batch[:, -6, :, feat_idx]) / 5.0
+                slope = (X_input[:, -1, :, feat_idx] - X_input[:, -6, :, feat_idx]) / 5.0
                 H = predictions.shape[1]
-                steps = torch.arange(1, H + 1, device=X_batch.device).float().view(1, -1, 1)
+                steps = torch.arange(1, H + 1, device=X_input.device).float().view(1, -1, 1)
                 prior = y_last.unsqueeze(1) + slope.unsqueeze(1) * steps  # (B, H, N)
             else:
                 prior = y_last.unsqueeze(1).expand_as(predictions)        # (B, H, N)
@@ -1120,6 +1181,10 @@ def train_epoch(model, train_loader, optimizer, criterion, adj, config, teacher_
                 predictions = predictions + hw * prior
             else:
                 predictions = predictions + prior
+
+        # Reverse RevIN: map predictions back to log1p+StdScaler space before loss.
+        if revin is not None:
+            predictions = revin.denormalize(predictions)
 
         # t-24 daily anchor: add learnable-gated PM2.5 from 24h ago.
         if config.get('use_t24_residual', False):
@@ -1173,6 +1238,8 @@ def validate(model, val_loader, criterion, adj, config, target_scaler=None, met_
     use_future_met = config.get('use_future_met', False)
     y_aux_batch_idx = 3 if use_future_met else 2
 
+    revin = RevIN(config.get('revin_feature_indices', [0])) if config.get('use_revin', False) else None
+
     with torch.no_grad():
         for batch in val_loader:
             X_batch = batch[0].to(device)
@@ -1196,8 +1263,9 @@ def validate(model, val_loader, criterion, adj, config, target_scaler=None, met_
                 Z_batch = last_met.expand(-1, config['horizon'], -1, -1).contiguous()
 
             # Forward pass (no teacher forcing); aux head ignored during validation
+            X_input = revin.normalize(X_batch) if revin is not None else X_batch
             out = model(
-                x=X_batch,
+                x=X_input,
                 adj=adj_batch,
                 target=None,
                 horizon=config['horizon'],
@@ -1212,15 +1280,15 @@ def validate(model, val_loader, criterion, adj, config, target_scaler=None, met_
             if config.get('use_persistence_residual', False):
                 feat_idx = config.get('target_feature_idx', 0)
                 rw = config.get('residual_window', 1)
-                y_last = (X_batch[:, -rw:, :, feat_idx].mean(dim=1) if rw > 1
-                          else X_batch[:, -1, :, feat_idx])
+                y_last = (X_input[:, -rw:, :, feat_idx].mean(dim=1) if rw > 1
+                          else X_input[:, -1, :, feat_idx])
                 if config.get('use_per_station_norm', False):
                     y_last = (y_last * config['_feat_pm25_scale'] + config['_feat_pm25_mean']
                               - config['_target_means']) / config['_target_scales']
                 if config.get('use_trend_residual', False):
-                    slope = (X_batch[:, -1, :, feat_idx] - X_batch[:, -6, :, feat_idx]) / 5.0
+                    slope = (X_input[:, -1, :, feat_idx] - X_input[:, -6, :, feat_idx]) / 5.0
                     H = predictions.shape[1]
-                    steps = torch.arange(1, H + 1, device=X_batch.device).float().view(1, -1, 1)
+                    steps = torch.arange(1, H + 1, device=X_input.device).float().view(1, -1, 1)
                     prior = y_last.unsqueeze(1) + slope.unsqueeze(1) * steps
                 else:
                     prior = y_last.unsqueeze(1).expand_as(predictions)
@@ -1229,6 +1297,10 @@ def validate(model, val_loader, criterion, adj, config, target_scaler=None, met_
                     predictions = predictions + hw * prior
                 else:
                     predictions = predictions + prior
+
+            # Reverse RevIN: map predictions back to log1p+StdScaler space.
+            if revin is not None:
+                predictions = revin.denormalize(predictions)
 
             # t-24 daily anchor
             if config.get('use_t24_residual', False):
@@ -1278,6 +1350,8 @@ def compute_metrics(model, test_loader, adj, config, target_scaler=None, met_for
 
     use_future_met = config.get('use_future_met', False)
 
+    revin = RevIN(config.get('revin_feature_indices', [0])) if config.get('use_revin', False) else None
+
     with torch.no_grad():
         for batch in test_loader:
             X_batch = batch[0].to(device)
@@ -1300,21 +1374,22 @@ def compute_metrics(model, test_loader, adj, config, target_scaler=None, met_for
                 last_met = X_batch[:, -1:, :, :][:, :, :, met_cols]  # (B, 1, N, F_met)
                 Z_batch = last_met.expand(-1, config['horizon'], -1, -1).contiguous()
 
-            predictions = model.predict(X_batch, adj_batch, horizon=config['horizon'],
+            X_input = revin.normalize(X_batch) if revin is not None else X_batch
+            predictions = model.predict(X_input, adj_batch, horizon=config['horizon'],
                                         future_met=Z_batch)
 
             # Persistence residual: add last observed PM2.5 to model delta output
             if use_residual:
                 rw = config.get('residual_window', 1)
-                y_last = (X_batch[:, -rw:, :, feat_idx].mean(dim=1) if rw > 1
-                          else X_batch[:, -1, :, feat_idx])
+                y_last = (X_input[:, -rw:, :, feat_idx].mean(dim=1) if rw > 1
+                          else X_input[:, -1, :, feat_idx])
                 if config.get('use_per_station_norm', False):
                     y_last = (y_last * config['_feat_pm25_scale'] + config['_feat_pm25_mean']
                               - config['_target_means']) / config['_target_scales']
                 if config.get('use_trend_residual', False):
-                    slope = (X_batch[:, -1, :, feat_idx] - X_batch[:, -6, :, feat_idx]) / 5.0
+                    slope = (X_input[:, -1, :, feat_idx] - X_input[:, -6, :, feat_idx]) / 5.0
                     H = predictions.shape[1]
-                    steps = torch.arange(1, H + 1, device=X_batch.device).float().view(1, -1, 1)
+                    steps = torch.arange(1, H + 1, device=X_input.device).float().view(1, -1, 1)
                     prior = y_last.unsqueeze(1) + slope.unsqueeze(1) * steps
                 else:
                     prior = y_last.unsqueeze(1).expand_as(predictions)
@@ -1323,6 +1398,10 @@ def compute_metrics(model, test_loader, adj, config, target_scaler=None, met_for
                     predictions = predictions + hw * prior
                 else:
                     predictions = predictions + prior
+
+            # Reverse RevIN: map predictions back to log1p+StdScaler space.
+            if revin is not None:
+                predictions = revin.denormalize(predictions)
 
             # t-24 daily anchor
             if use_t24:
