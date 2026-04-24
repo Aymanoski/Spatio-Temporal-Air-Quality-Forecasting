@@ -88,6 +88,9 @@ if __name__ == "__main__":
                         help="Insert PM2.5 first-difference as feature at index 17 (shifts wind one-hot to [18:34])")
     parser.add_argument("--add_holiday", action="store_true",
                         help="Insert Chinese holiday indicator as feature at index 17 (shifts wind one-hot to [18:34])")
+    parser.add_argument("--save_y_aux", action="store_true",
+                        help="Also save Y_aux_{input_len}.npy: future values of features 1-5 "
+                             "(PM10, SO2, NO2, CO, O3) at the same horizon steps as Y.")
     args = parser.parse_args()
 
     if args.add_pm25_delta and args.add_holiday:
@@ -143,3 +146,18 @@ if __name__ == "__main__":
     print(f"Y shape: {Y.shape}  -> saved to {y_path}")
     if args.add_pm25_delta or args.add_holiday:
         print("Extra feature inserted at index 17. Wind one-hot now at [18:34].")
+
+    if args.save_y_aux:
+        # Y_aux: future values of features 1-5 (PM10, SO2, NO2, CO, O3).
+        # Uses the same sliding-window indices as Y — no future leakage.
+        # data_tensor is unmodified (no delta/holiday insert shifts features 1-5).
+        raw_data = np.load(tensor_path)  # reload original (before any insert)
+        T_raw = raw_data.shape[0]
+        Y_aux = []
+        for i in range(T_raw - args.input_len - args.horizon + 1):
+            Y_aux.append(raw_data[i + args.input_len: i + args.input_len + args.horizon, :, 1:6])
+        Y_aux = np.array(Y_aux, dtype=np.float32)  # (N, horizon, nodes, 5)
+        y_aux_path = os.path.join(args.data_path, f"Y_aux_{args.input_len}.npy")
+        np.save(y_aux_path, Y_aux)
+        print(f"Y_aux shape: {Y_aux.shape}  -> saved to {y_aux_path}  "
+              f"(features: PM10, SO2, NO2, CO, O3)")

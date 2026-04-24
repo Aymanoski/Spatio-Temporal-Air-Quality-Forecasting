@@ -619,6 +619,8 @@ class GraphTransformerModel(nn.Module):
         use_horizon_residual_weights: bool = False,
         use_learnable_static_adj: bool = False,
         initial_distance_sigma: float = 1800.0,
+        use_multitask: bool = False,
+        n_aux_targets: int = 5,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -630,6 +632,7 @@ class GraphTransformerModel(nn.Module):
         self.use_t24_residual = use_t24_residual
         self.use_horizon_residual_weights = use_horizon_residual_weights
         self.use_learnable_static_adj = use_learnable_static_adj
+        self.use_multitask = use_multitask
 
         # Horizon-dependent residual weights: σ(logit_h) scales the persistence prior
         # per horizon step. Initialized to logit(0.95) ≈ 2.94 so initial behavior
@@ -745,6 +748,21 @@ class GraphTransformerModel(nn.Module):
                 future_met_dim=future_met_dim,
             )
 
+        # Auxiliary multi-task head: same architecture as main head but predicts
+        # n_aux_targets pollutants (PM10, SO2, NO2, CO, O3) jointly.
+        # Shares the encoder — backprop through aux_loss regularises shared representations.
+        # Active during training only; predict() uses main head (PM2.5) exclusively.
+        if use_multitask:
+            self.aux_head = DirectHorizonHead(
+                hidden_dim=hidden_dim,
+                output_dim=n_aux_targets,
+                horizon=horizon,
+                dropout=dropout,
+                max_horizon=max(horizon, 24),
+            )
+        else:
+            self.aux_head = None
+
     def forward(
         self,
         x: torch.Tensor,
@@ -777,7 +795,8 @@ class GraphTransformerModel(nn.Module):
             enc_out = enc_out + gat_out             # residual
 
         predictions = self.head(enc_out, horizon, future_met=future_met)  # (B, horizon, N, output_dim)
-        return predictions, None
+        aux_predictions = self.aux_head(enc_out, horizon) if self.use_multitask else None
+        return predictions, None, aux_predictions
 
     def predict(self, x: torch.Tensor, adj: torch.Tensor, horizon: int = 6,
                 future_met: torch.Tensor = None) -> torch.Tensor:

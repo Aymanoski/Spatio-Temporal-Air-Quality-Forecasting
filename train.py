@@ -121,7 +121,7 @@ CONFIG = {
     'batch_size': 32,
     'learning_rate': 1e-3,
     'weight_decay': 1e-5,
-    'optimizer_type': 'adamw',  # AdamW matches Transformer training better than Adam+L2
+    'optimizer_type': 'adam',  # AdamW TRIED AND REJECTED 2026-04-24: alpha collapsed 0.64→0.16, test MAE 19.977 vs 19.813. Weight decay destabilizes learnable alpha gate.
     'epochs': 100,
     'patience': 15,          # Early stopping patience (back to original)
     'teacher_forcing_start': 1.0,  # Initial teacher forcing ratio
@@ -129,7 +129,7 @@ CONFIG = {
 
     # Loss
     'loss_type': 'evt_hybrid',     # Options: 'mse', 'huber', or 'evt_hybrid'
-    'evt_base_loss_type': 'huber', # Base regression loss used inside EVT hybrid ('mse'|'huber')
+    'evt_base_loss_type': 'mse',  # Huber TRIED AND REJECTED 2026-04-24: reduces gradient for large errors → alpha collapses → wind adjacency disabled → test MAE 19.977 vs 19.813
     'huber_delta': 1.0,            # SmoothL1 beta in normalized target space
     'evt_lambda': 0.05,            # Base weight of EVT tail component (used if no schedule)
     'evt_tail_quantile': 0.90,     # Threshold quantile for extremes
@@ -218,7 +218,18 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_evt_huber_adamw_std',
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_multitask',
+
+    # Multi-task auxiliary prediction (PM10, SO2, NO2, CO, O3 alongside PM2.5).
+    # Shared encoder is trained to explain all 6 pollutants simultaneously.
+    # Auxiliary heads are only active during training — PM2.5 head is used at inference.
+    # Loss: total = PM25_loss + lambda_aux * aux_MSE_loss
+    # Auxiliary targets are log1p-transformed and StandardScaler-normalised (same as X features 1-5).
+    # Start with lambda_aux=0.1; try 0.05, 0.2, 0.3 if needed.
+    'use_multitask': True,
+    'lambda_aux': 0.1,
+    'n_aux_targets': 5,          # PM10, SO2, NO2, CO, O3
+    'aux_target_indices': [1, 2, 3, 4, 5],  # feature indices in original space
 
     # Learnable static adjacency (TRIED AND REJECTED 2026-04-23):
     # test MAE 19.836 vs baseline 19.813 — statistical tie. Alpha collapsed 0.62→0.21.
@@ -533,7 +544,19 @@ def load_data(config):
         Z = np.load(z_path)
         print(f"Loaded Z (future met): {Z.shape}")  # (samples, horizon, num_nodes, F_met)
 
-    return X, Y, adj, Z
+    # Load auxiliary pollutant targets if multi-task is enabled
+    Y_aux = None
+    if config.get('use_multitask', False):
+        y_aux_path = os.path.join(data_path, f'Y_aux_{input_len}.npy')
+        if not os.path.exists(y_aux_path):
+            raise FileNotFoundError(
+                f"Y_aux tensor not found: {y_aux_path}\n"
+                f"Generate it with: python utils/window.py --input_len {input_len} --save_y_aux"
+            )
+        Y_aux = np.load(y_aux_path)
+        print(f"Loaded Y_aux (aux targets): {Y_aux.shape}")  # (samples, horizon, nodes, 5)
+
+    return X, Y, adj, Z, Y_aux
 
 
 def extract_wind_features(X_batch, config):
@@ -816,6 +839,30 @@ def scale_future_met(Z, feature_scaler, config):
     return Z_scaled_flat.reshape(n_samples, h, n_nodes, f_met).astype(np.float32)
 
 
+def scale_aux_targets(Y_aux, feature_scaler, config):
+    """
+    Scale Y_aux (future PM10, SO2, NO2, CO, O3) using the training feature_scaler.
+
+    Y_aux shape: (N_samples, horizon, num_nodes, 5)
+    Features 1-5 in original space correspond to indices 1-5 in feature_scaler.mean_/scale_.
+    Applies log1p first (same indices are in log_transform_indices), then StandardScaler stats.
+    """
+    aux_indices = config.get('aux_target_indices', [1, 2, 3, 4, 5])  # feature indices in X
+    log_indices = set(config.get('log_transform_indices', [])) if config.get('use_log_transform') else set()
+
+    Y_aux_out = Y_aux.copy().astype(np.float32)
+    for j, feat_idx in enumerate(aux_indices):
+        if feat_idx in log_indices:
+            Y_aux_out[..., j] = np.log1p(Y_aux[..., j])
+
+    # Apply StandardScaler stats: feature_scaler was fit on features 0..wind_start_idx-1
+    # aux_indices are within that range, so feature_scaler.mean_/scale_ are directly indexable.
+    mean = feature_scaler.mean_[aux_indices]    # (5,)
+    scale = feature_scaler.scale_[aux_indices]  # (5,)
+    Y_aux_out = (Y_aux_out - mean) / scale
+    return Y_aux_out.astype(np.float32)
+
+
 def create_dataloaders(train_data, val_data, test_data, config):
     """Create PyTorch DataLoaders."""
     X_train, Y_train = train_data[0], train_data[1]
@@ -824,17 +871,24 @@ def create_dataloaders(train_data, val_data, test_data, config):
     Z_train = train_data[2] if len(train_data) > 2 else None
     Z_val   = val_data[2]   if len(val_data)   > 2 else None
     Z_test  = test_data[2]  if len(test_data)  > 2 else None
+    # Y_aux always at position 3 (after Z, even if Z is None — caller must maintain ordering)
+    Y_aux_train = train_data[3] if len(train_data) > 3 else None
+    Y_aux_val   = val_data[3]   if len(val_data)   > 3 else None
+    Y_aux_test  = test_data[3]  if len(test_data)  > 3 else None
 
-    # Convert to tensors — include Z if future_met is enabled
-    def _make_dataset(X, Y, Z):
+    # Tensor order in batch: [X, Y, Z (opt), Y_aux (opt)]
+    # train_epoch/validate extract by position using config flags.
+    def _make_dataset(X, Y, Z, Y_aux):
         tensors = [torch.FloatTensor(X), torch.FloatTensor(Y)]
         if Z is not None:
             tensors.append(torch.FloatTensor(Z))
+        if Y_aux is not None:
+            tensors.append(torch.FloatTensor(Y_aux))
         return TensorDataset(*tensors)
 
-    train_dataset = _make_dataset(X_train, Y_train, Z_train)
-    val_dataset   = _make_dataset(X_val,   Y_val,   Z_val)
-    test_dataset  = _make_dataset(X_test,  Y_test,  Z_test)
+    train_dataset = _make_dataset(X_train, Y_train, Z_train, Y_aux_train)
+    val_dataset   = _make_dataset(X_val,   Y_val,   Z_val,   Y_aux_val)
+    test_dataset  = _make_dataset(X_test,  Y_test,  Z_test,  Y_aux_test)
     
     train_loader = DataLoader(
         train_dataset,
@@ -964,10 +1018,17 @@ def train_epoch(model, train_loader, optimizer, criterion, adj, config, teacher_
     use_wind_adj = config.get('use_wind_adjacency', False)
     met_cols = config.get('future_met_indices', [])
 
+    use_multitask = config.get('use_multitask', False)
+    lambda_aux = float(config.get('lambda_aux', 0.1))
+    use_future_met = config.get('use_future_met', False)
+    # Y_aux batch position: 3 if Z also present, else 2
+    y_aux_batch_idx = 3 if use_future_met else 2
+
     for batch_idx, batch in enumerate(train_loader):
         X_batch = batch[0].to(device)
         Y_batch = batch[1].to(device)
-        Z_batch = batch[2].to(device) if len(batch) > 2 else None
+        Z_batch = batch[2].to(device) if use_future_met and len(batch) > 2 else None
+        Y_aux_batch = batch[y_aux_batch_idx].to(device) if use_multitask and len(batch) > y_aux_batch_idx else None
 
         # Gaussian noise augmentation: perturb continuous features only (not wind one-hot).
         # Applied in training only — validate() and compute_metrics() never call this path.
@@ -998,7 +1059,7 @@ def train_epoch(model, train_loader, optimizer, criterion, adj, config, teacher_
             Z_batch = last_met.expand(-1, config['horizon'], -1, -1).contiguous()
 
         # Forward pass
-        predictions, _ = model(
+        out = model(
             x=X_batch,
             adj=adj_batch,
             target=Y_batch,
@@ -1006,6 +1067,8 @@ def train_epoch(model, train_loader, optimizer, criterion, adj, config, teacher_
             teacher_forcing_ratio=teacher_forcing_ratio,
             future_met=Z_batch,
         )
+        predictions = out[0]
+        aux_preds = out[2] if len(out) > 2 else None  # (B, H, N, n_aux) or None
 
         # predictions: (batch, horizon, num_nodes, 1)
         # Y_batch: (batch, horizon, num_nodes)
@@ -1028,16 +1091,21 @@ def train_epoch(model, train_loader, optimizer, criterion, adj, config, teacher_
                 predictions = predictions + prior
 
         # t-24 daily anchor: add learnable-gated PM2.5 from 24h ago.
-        # y_{t-24} is the first timestep of the 24h lookback window (index 0).
-        # Gradient flows through t24_alpha so the gate is optimized end-to-end.
         if config.get('use_t24_residual', False):
             feat_idx = config.get('target_feature_idx', 0)
             y_t24 = X_batch[:, 0, :, feat_idx]                        # (B, N)
             t24_alpha = model.get_t24_alpha()                          # scalar tensor
             predictions = predictions + t24_alpha * y_t24.unsqueeze(1).expand_as(predictions)
 
-        # Compute loss
+        # Compute PM2.5 loss
         loss = criterion(predictions, Y_batch)
+
+        # Auxiliary multi-task loss: MSE on (PM10, SO2, NO2, CO, O3) predictions.
+        # aux_preds: (B, H, N, n_aux),  Y_aux_batch: (B, H, N, n_aux)
+        # Uses scaled (log1p + StdScaler) targets — same normalisation as features 1-5 in X.
+        if use_multitask and aux_preds is not None and Y_aux_batch is not None:
+            aux_loss = F.mse_loss(aux_preds, Y_aux_batch)
+            loss = loss + lambda_aux * aux_loss
         
         # Backward pass
         loss.backward()
@@ -1071,11 +1139,14 @@ def validate(model, val_loader, criterion, adj, config, target_scaler=None, met_
     use_wind_adj = config.get('use_wind_adjacency', False)
     met_cols = config.get('future_met_indices', [])
 
+    use_future_met = config.get('use_future_met', False)
+    y_aux_batch_idx = 3 if use_future_met else 2
+
     with torch.no_grad():
         for batch in val_loader:
             X_batch = batch[0].to(device)
             Y_batch = batch[1].to(device)
-            Z_batch = batch[2].to(device) if len(batch) > 2 else None
+            Z_batch = batch[2].to(device) if use_future_met and len(batch) > 2 else None
 
             # Build dynamic adjacency if enabled
             if use_wind_adj:
@@ -1093,8 +1164,8 @@ def validate(model, val_loader, criterion, adj, config, target_scaler=None, met_
                 last_met = X_batch[:, -1:, :, :][:, :, :, met_cols]  # (B, 1, N, F_met)
                 Z_batch = last_met.expand(-1, config['horizon'], -1, -1).contiguous()
 
-            # Forward pass (no teacher forcing)
-            predictions, _ = model(
+            # Forward pass (no teacher forcing); aux head ignored during validation
+            out = model(
                 x=X_batch,
                 adj=adj_batch,
                 target=None,
@@ -1102,6 +1173,7 @@ def validate(model, val_loader, criterion, adj, config, target_scaler=None, met_
                 teacher_forcing_ratio=0.0,
                 future_met=Z_batch,
             )
+            predictions = out[0]
 
             predictions = predictions.squeeze(-1)
 
@@ -1126,6 +1198,7 @@ def validate(model, val_loader, criterion, adj, config, target_scaler=None, met_
                 t24_alpha = model.get_t24_alpha()
                 predictions = predictions + t24_alpha * y_t24.unsqueeze(1).expand_as(predictions)
 
+            # Val loss uses PM2.5 criterion only (aux excluded from early stopping signal)
             loss = criterion(predictions, Y_batch)
             total_loss += loss.item()
 
@@ -1164,11 +1237,13 @@ def compute_metrics(model, test_loader, adj, config, target_scaler=None, met_for
     use_t24 = config.get('use_t24_residual', False)
     feat_idx = config.get('target_feature_idx', 0)
 
+    use_future_met = config.get('use_future_met', False)
+
     with torch.no_grad():
         for batch in test_loader:
             X_batch = batch[0].to(device)
             Y_batch = batch[1]
-            Z_batch = batch[2].to(device) if len(batch) > 2 else None
+            Z_batch = batch[2].to(device) if use_future_met and len(batch) > 2 else None
 
             # Build dynamic adjacency if enabled
             if use_wind_adj:
@@ -1264,7 +1339,7 @@ def train(config, trial=None):
 
     # Load data
     print("\n[1/6] Loading data...")
-    X, Y, adj, Z = load_data(config)
+    X, Y, adj, Z, Y_aux = load_data(config)
     adj = torch.FloatTensor(adj).to(device)
 
     # Update config with actual dimensions
@@ -1283,15 +1358,24 @@ def train(config, trial=None):
     X_val, Y_val = val_data
     X_test, Y_test = test_data
 
-    # Split Z along the same chronological boundaries if future_met is enabled
+    # Split Z and Y_aux along the same chronological boundaries
+    n = len(X)
+    train_end = int(n * config['train_ratio'])
+    val_end = int(n * (config['train_ratio'] + config['val_ratio']))
+
     if Z is not None:
-        n = len(X)
-        train_end = int(n * config['train_ratio'])
-        val_end = int(n * (config['train_ratio'] + config['val_ratio']))
         Z_train, Z_val, Z_test = Z[:train_end], Z[train_end:val_end], Z[val_end:]
         print(f"  Z split: train={len(Z_train)}, val={len(Z_val)}, test={len(Z_test)}")
     else:
         Z_train = Z_val = Z_test = None
+
+    if Y_aux is not None:
+        Y_aux_train = Y_aux[:train_end]
+        Y_aux_val   = Y_aux[train_end:val_end]
+        Y_aux_test  = Y_aux[val_end:]
+        print(f"  Y_aux split: train={len(Y_aux_train)}, val={len(Y_aux_val)}, test={len(Y_aux_test)}")
+    else:
+        Y_aux_train = Y_aux_val = Y_aux_test = None
 
     # Correlation-based static adjacency: computed from raw training PM2.5 (no leakage).
     # Replaces Gaussian distance decay as the static component; wind component unchanged.
@@ -1318,6 +1402,7 @@ def train(config, trial=None):
         X_val_scaled, Y_val_scaled = X_val.astype(np.float32), Y_val.astype(np.float32)
         X_test_scaled, Y_test_scaled = X_test.astype(np.float32), Y_test.astype(np.float32)
         Z_train_scaled = Z_val_scaled = Z_test_scaled = None
+        Y_aux_train_scaled = Y_aux_val_scaled = Y_aux_test_scaled = None
 
         # Try to load existing target scaler for metrics inverse transform
         scaler_path = os.path.join(config['data_path'], 'target_scaler.save')
@@ -1339,6 +1424,16 @@ def train(config, trial=None):
                   f"range [{Z_train_scaled[:,:,:,:5].min():.3f}, {Z_train_scaled[:,:,:,:5].max():.3f}] (met features)")
         else:
             Z_train_scaled = Z_val_scaled = Z_test_scaled = None
+
+        # Scale auxiliary pollutant targets using training feature_scaler stats for features 1-5
+        if Y_aux_train is not None:
+            Y_aux_train_scaled = scale_aux_targets(Y_aux_train, feature_scaler, config)
+            Y_aux_val_scaled   = scale_aux_targets(Y_aux_val,   feature_scaler, config)
+            Y_aux_test_scaled  = scale_aux_targets(Y_aux_test,  feature_scaler, config)
+            print(f"  Y_aux scaled: shape {Y_aux_train_scaled.shape}, "
+                  f"range [{Y_aux_train_scaled.min():.3f}, {Y_aux_train_scaled.max():.3f}]")
+        else:
+            Y_aux_train_scaled = Y_aux_val_scaled = Y_aux_test_scaled = None
 
         print(f"  Feature scaler mean[:3]: {feature_scaler.mean_[:3]}  std[:3]: {feature_scaler.scale_[:3]}")
         if isinstance(target_scaler, list):
@@ -1407,11 +1502,12 @@ def train(config, trial=None):
     else:
         Z_dl_train, Z_dl_val, Z_dl_test = Z_train_scaled, Z_val_scaled, Z_test_scaled
 
-    # Create dataloaders with scaled data (Z included when future_met is enabled and not predicted)
+    # Create dataloaders: order is [X, Y, Z (opt), Y_aux (opt)]
+    # Y_aux is always at position 3 (after Z slot, even if Z is None — create_dataloaders handles it)
     train_loader, val_loader, test_loader = create_dataloaders(
-        (X_train_scaled, Y_train_scaled, Z_dl_train),
-        (X_val_scaled,   Y_val_scaled,   Z_dl_val),
-        (X_test_scaled,  Y_test_scaled,  Z_dl_test),
+        (X_train_scaled, Y_train_scaled, Z_dl_train, Y_aux_train_scaled),
+        (X_val_scaled,   Y_val_scaled,   Z_dl_val,   Y_aux_val_scaled),
+        (X_test_scaled,  Y_test_scaled,  Z_dl_test,  Y_aux_test_scaled),
         config
     )
 
@@ -1446,6 +1542,8 @@ def train(config, trial=None):
             use_horizon_residual_weights=config.get('use_horizon_residual_weights', False),
             use_learnable_static_adj=config.get('use_learnable_static_adj', False),
             initial_distance_sigma=config.get('distance_sigma', 1800.0),
+            use_multitask=config.get('use_multitask', False),
+            n_aux_targets=config.get('n_aux_targets', 5),
         ).to(device)
         print(f"  Model type: GraphTransformerModel  graph_conv={config.get('graph_conv', 'gcn')}  gat_version={config.get('gat_version', 'v1')}  num_gat_layers={config.get('num_gat_layers', 1)}  post_gat={config.get('use_post_temporal_gat', False)}  temporal_attn_head={config.get('use_temporal_attention_head', False)}")
     else:
