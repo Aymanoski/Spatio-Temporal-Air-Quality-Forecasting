@@ -227,7 +227,7 @@ CONFIG = {
     # Auxiliary targets are log1p-transformed and StandardScaler-normalised (same as X features 1-5).
     # Start with lambda_aux=0.1; try 0.05, 0.2, 0.3 if needed.
     'use_multitask': True,
-    'lambda_aux': 0.1,
+    'lambda_aux': 0.03,
     'n_aux_targets': 5,          # PM10, SO2, NO2, CO, O3
     'aux_target_indices': [1, 2, 3, 4, 5],  # feature indices in original space
 
