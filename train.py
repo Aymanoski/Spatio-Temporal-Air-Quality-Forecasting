@@ -111,9 +111,11 @@ CONFIG = {
     # Log1p input/target transform. Applied to right-skewed features before StandardScaling.
     # PM2.5 (idx 0): target + input. Inverse expm1 applied after inverse_transform in metrics.
     # Pollutants (idx 1-5: PM10, SO2, NO2, CO, O3): input only, no inverse needed.
-    # Wind speed (idx 10: wspm): input only, right-skewed and non-negative.
+    # wspm (idx 10) EXCLUDED: wspm is read by build_dynamic_adjacency_gpu at wind_speed_idx=10
+    # to compute wind transport weights — applying log1p corrupts the wind adjacency signal
+    # (alpha collapsed 0.65→0.12 in the combined run, confirming destroyed wind signal).
     'use_log_transform': True,
-    'log_transform_indices': [0, 1, 2, 3, 4, 5, 10],  # feature indices in X to apply log1p
+    'log_transform_indices': [0, 1, 2, 3, 4, 5],  # wspm excluded — wind adjacency protection
 
     # Training
     'batch_size': 32,
@@ -216,7 +218,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_evt_huber_adamw_log1p_wspm_std',
+    'architecture_name': 'graph_transformer_gat_v1_residual_evt_huber_adamw_std',
 
     # Learnable static adjacency (TRIED AND REJECTED 2026-04-23):
     # test MAE 19.836 vs baseline 19.813 — statistical tie. Alpha collapsed 0.62→0.21.
