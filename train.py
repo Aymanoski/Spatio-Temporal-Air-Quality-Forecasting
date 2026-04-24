@@ -218,18 +218,42 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_multitask',
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias',
 
-    # Multi-task auxiliary prediction (PM10, SO2, NO2, CO, O3 alongside PM2.5).
-    # Shared encoder is trained to explain all 6 pollutants simultaneously.
-    # Auxiliary heads are only active during training — PM2.5 head is used at inference.
-    # Loss: total = PM25_loss + lambda_aux * aux_MSE_loss
-    # Auxiliary targets are log1p-transformed and StandardScaler-normalised (same as X features 1-5).
-    # Start with lambda_aux=0.1; try 0.05, 0.2, 0.3 if needed.
-    'use_multitask': True,
-    'lambda_aux': 0.03,
+    # Multi-task auxiliary prediction — TRIED AND REJECTED 2026-04-24:
+    # lambda=0.1 → test MAE 20.200, RMSE 38.157. Smaller lambda also failed.
+    # Aux heads compete with PM2.5 head; pollutants already implicit in encoder input.
+    'use_multitask': False,
+    'lambda_aux': 0.1,
     'n_aux_targets': 5,          # PM10, SO2, NO2, CO, O3
     'aux_target_indices': [1, 2, 3, 4, 5],  # feature indices in original space
+
+    # -------------------------------------------------------------------------
+    # Experiments 4–7 (2026-04-24+): cheap structural improvements before Optuna
+    # -------------------------------------------------------------------------
+
+    # Exp 4: Station × horizon output bias.
+    # 72 learnable parameters (horizon × num_nodes). Zero-init — starts identical
+    # to baseline. Learns per-(step, station) systematic offset in normalized space.
+    # Safe: no loss change, no alpha risk.
+    'use_station_horizon_bias': True,
+
+    # Exp 5: Rolling-mean residual anchor.
+    # residual_window=1 → current behavior (last observed value).
+    # residual_window=k → mean of last k timesteps used as prior.
+    # Try: 3, 6, 12 in separate runs.
+    'residual_window': 1,
+
+    # Exp 6: Soft regime conditioning.
+    # Injects last PM2.5 (normalized) directly into enc_out before the head via
+    # a zero-initialized Linear(1, hidden_dim). Starts identical to baseline.
+    'use_regime_conditioning': False,
+
+    # Exp 7: Trend extrapolation residual anchor.
+    # Replaces flat persistence prior with y_last + h * slope_last_6h.
+    # slope = (X[-1] - X[-6]) / 5 in normalized space.
+    # Only active when use_persistence_residual=True.
+    'use_trend_residual': False,
 
     # Learnable static adjacency (TRIED AND REJECTED 2026-04-23):
     # test MAE 19.836 vs baseline 19.813 — statistical tie. Alpha collapsed 0.62→0.21.
@@ -1078,12 +1102,19 @@ def train_epoch(model, train_loader, optimizer, criterion, adj, config, teacher_
         # Add the baseline so loss is computed on final predictions vs actual targets.
         if config.get('use_persistence_residual', False):
             feat_idx = config.get('target_feature_idx', 0)
-            y_last = X_batch[:, -1, :, feat_idx]           # (B, N) in global feature space
+            rw = config.get('residual_window', 1)
+            y_last = (X_batch[:, -rw:, :, feat_idx].mean(dim=1) if rw > 1
+                      else X_batch[:, -1, :, feat_idx])    # (B, N) in global feature space
             if config.get('use_per_station_norm', False):
-                # Convert: undo global feature standardization, apply per-station target standardization
                 y_last = (y_last * config['_feat_pm25_scale'] + config['_feat_pm25_mean']
                           - config['_target_means']) / config['_target_scales']
-            prior = y_last.unsqueeze(1).expand_as(predictions)  # (B, H, N)
+            if config.get('use_trend_residual', False):
+                slope = (X_batch[:, -1, :, feat_idx] - X_batch[:, -6, :, feat_idx]) / 5.0
+                H = predictions.shape[1]
+                steps = torch.arange(1, H + 1, device=X_batch.device).float().view(1, -1, 1)
+                prior = y_last.unsqueeze(1) + slope.unsqueeze(1) * steps  # (B, H, N)
+            else:
+                prior = y_last.unsqueeze(1).expand_as(predictions)        # (B, H, N)
             if config.get('use_horizon_residual_weights', False):
                 hw = model.get_horizon_residual_weights().view(1, -1, 1)  # (1, H, 1)
                 predictions = predictions + hw * prior
@@ -1180,11 +1211,19 @@ def validate(model, val_loader, criterion, adj, config, target_scaler=None, met_
             # Persistence residual: add last observed PM2.5 to model delta output
             if config.get('use_persistence_residual', False):
                 feat_idx = config.get('target_feature_idx', 0)
-                y_last = X_batch[:, -1, :, feat_idx]
+                rw = config.get('residual_window', 1)
+                y_last = (X_batch[:, -rw:, :, feat_idx].mean(dim=1) if rw > 1
+                          else X_batch[:, -1, :, feat_idx])
                 if config.get('use_per_station_norm', False):
                     y_last = (y_last * config['_feat_pm25_scale'] + config['_feat_pm25_mean']
                               - config['_target_means']) / config['_target_scales']
-                prior = y_last.unsqueeze(1).expand_as(predictions)
+                if config.get('use_trend_residual', False):
+                    slope = (X_batch[:, -1, :, feat_idx] - X_batch[:, -6, :, feat_idx]) / 5.0
+                    H = predictions.shape[1]
+                    steps = torch.arange(1, H + 1, device=X_batch.device).float().view(1, -1, 1)
+                    prior = y_last.unsqueeze(1) + slope.unsqueeze(1) * steps
+                else:
+                    prior = y_last.unsqueeze(1).expand_as(predictions)
                 if config.get('use_horizon_residual_weights', False):
                     hw = model.get_horizon_residual_weights().view(1, -1, 1)
                     predictions = predictions + hw * prior
@@ -1266,11 +1305,19 @@ def compute_metrics(model, test_loader, adj, config, target_scaler=None, met_for
 
             # Persistence residual: add last observed PM2.5 to model delta output
             if use_residual:
-                y_last = X_batch[:, -1, :, feat_idx]                   # (B, N) in global feature space
+                rw = config.get('residual_window', 1)
+                y_last = (X_batch[:, -rw:, :, feat_idx].mean(dim=1) if rw > 1
+                          else X_batch[:, -1, :, feat_idx])
                 if config.get('use_per_station_norm', False):
                     y_last = (y_last * config['_feat_pm25_scale'] + config['_feat_pm25_mean']
                               - config['_target_means']) / config['_target_scales']
-                prior = y_last.unsqueeze(1).expand_as(predictions)
+                if config.get('use_trend_residual', False):
+                    slope = (X_batch[:, -1, :, feat_idx] - X_batch[:, -6, :, feat_idx]) / 5.0
+                    H = predictions.shape[1]
+                    steps = torch.arange(1, H + 1, device=X_batch.device).float().view(1, -1, 1)
+                    prior = y_last.unsqueeze(1) + slope.unsqueeze(1) * steps
+                else:
+                    prior = y_last.unsqueeze(1).expand_as(predictions)
                 if config.get('use_horizon_residual_weights', False):
                     hw = model.get_horizon_residual_weights().view(1, -1, 1)
                     predictions = predictions + hw * prior
@@ -1544,6 +1591,8 @@ def train(config, trial=None):
             initial_distance_sigma=config.get('distance_sigma', 1800.0),
             use_multitask=config.get('use_multitask', False),
             n_aux_targets=config.get('n_aux_targets', 5),
+            use_station_horizon_bias=config.get('use_station_horizon_bias', False),
+            use_regime_conditioning=config.get('use_regime_conditioning', False),
         ).to(device)
         print(f"  Model type: GraphTransformerModel  graph_conv={config.get('graph_conv', 'gcn')}  gat_version={config.get('gat_version', 'v1')}  num_gat_layers={config.get('num_gat_layers', 1)}  post_gat={config.get('use_post_temporal_gat', False)}  temporal_attn_head={config.get('use_temporal_attention_head', False)}")
     else:

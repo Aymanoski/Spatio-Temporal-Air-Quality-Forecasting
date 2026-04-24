@@ -621,6 +621,8 @@ class GraphTransformerModel(nn.Module):
         initial_distance_sigma: float = 1800.0,
         use_multitask: bool = False,
         n_aux_targets: int = 5,
+        use_station_horizon_bias: bool = False,
+        use_regime_conditioning: bool = False,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -633,6 +635,24 @@ class GraphTransformerModel(nn.Module):
         self.use_horizon_residual_weights = use_horizon_residual_weights
         self.use_learnable_static_adj = use_learnable_static_adj
         self.use_multitask = use_multitask
+        self.use_station_horizon_bias = use_station_horizon_bias
+
+        # Station × horizon output bias (Exp 4): 72 learnable scalars in normalized space.
+        # Zero-init so training starts identical to baseline; learns per-(step,node) correction.
+        if use_station_horizon_bias:
+            self.station_horizon_bias = nn.Parameter(torch.zeros(horizon, num_nodes))
+        else:
+            self.register_parameter('station_horizon_bias', None)
+
+        # Soft regime conditioning (Exp 6): direct shortcut from last observed PM2.5 → head.
+        # Zero-init weight/bias ensures training starts identical to baseline.
+        # Skipped when use_temporal_attention_head=True (enc_out has different shape).
+        if use_regime_conditioning:
+            self.regime_proj = nn.Linear(1, hidden_dim)
+            nn.init.zeros_(self.regime_proj.weight)
+            nn.init.zeros_(self.regime_proj.bias)
+        else:
+            self.regime_proj = None
 
         # Horizon-dependent residual weights: σ(logit_h) scales the persistence prior
         # per horizon step. Initialized to logit(0.95) ≈ 2.94 so initial behavior
@@ -794,7 +814,18 @@ class GraphTransformerModel(nn.Module):
             gat_out = self.post_gat(h_norm, adj)    # (B, N, H)
             enc_out = enc_out + gat_out             # residual
 
+        # Soft regime conditioning: inject last-observed PM2.5 directly into enc_out.
+        # Zero-init projection means gradient starts at baseline; learns only if useful.
+        if self.regime_proj is not None and not self.use_temporal_attention_head:
+            pm25_last = x[:, -1, :, 0:1]                       # (B, N, 1) normalized
+            enc_out = enc_out + self.regime_proj(pm25_last)     # (B, N, H)
+
         predictions = self.head(enc_out, horizon, future_met=future_met)  # (B, horizon, N, output_dim)
+
+        # Station × horizon output bias: additive correction in normalized prediction space.
+        if self.station_horizon_bias is not None:
+            predictions = predictions + self.station_horizon_bias.unsqueeze(0).unsqueeze(-1)  # (1, H, N, 1)
+
         aux_predictions = self.aux_head(enc_out, horizon) if self.use_multitask else None
         return predictions, None, aux_predictions
 
@@ -815,7 +846,12 @@ class GraphTransformerModel(nn.Module):
                 h_norm = self.post_gat_norm(enc_out)
                 gat_out = self.post_gat(h_norm, adj)
                 enc_out = enc_out + gat_out
+            if self.regime_proj is not None and not self.use_temporal_attention_head:
+                pm25_last = x[:, -1, :, 0:1]
+                enc_out = enc_out + self.regime_proj(pm25_last)
             predictions = self.head(enc_out, horizon, future_met=future_met)
+            if self.station_horizon_bias is not None:
+                predictions = predictions + self.station_horizon_bias.unsqueeze(0).unsqueeze(-1)
         return predictions.squeeze(-1)  # (B, horizon, N)
 
     def get_num_params(self) -> int:
