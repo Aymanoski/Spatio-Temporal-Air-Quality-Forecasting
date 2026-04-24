@@ -218,7 +218,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_revin',
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_rawwspm',
 
     # Multi-task auxiliary prediction — TRIED AND REJECTED 2026-04-24:
     # lambda=0.1 → test MAE 20.200, RMSE 38.157. Smaller lambda also failed.
@@ -287,8 +287,13 @@ CONFIG = {
     # forward pass, then reverses the normalization on predictions before the loss.
     # Targets the persistent val/test gap (~1.6 MAE) attributed to distribution shift.
     # Watch: alpha gate — RevIN changes per-instance gradient scale; if alpha < 0.15, it has destabilized.
-    'use_revin': True,
-    'revin_feature_indices': [0],  # PM2.5 only to minimize alpha-gate interaction risk
+    # RevIN TRIED AND REJECTED 2026-04-25: test MAE 20.723 vs baseline 19.793 (+0.930).
+    # Persistence residual already anchors to y_last; RevIN's window-mean anchor competes
+    # with it (y_last ≠ window mean), creating two conflicting level corrections.
+    # Val MAE also degraded (18.898 vs 18.2), confirming training was harder, not just generalisation.
+    # Alpha stayed stable (0.34), so rejection is not an alpha-collapse issue.
+    'use_revin': False,
+    'revin_feature_indices': [0],  # PM2.5 only
 
     'hardware_tag': 'T4',       # Options: 'integrated_gpu', 'T4', 'rtx3090', etc.
     'use_versioned_checkpoint': True,       # If True, saves as <arch>_<hardware>_best.pt
@@ -679,11 +684,24 @@ def build_dynamic_adjacency(X_batch, config, device, alpha_override=None, sigma_
         adj_batch: (batch, num_nodes, num_nodes)            when use_per_timestep_adj=False
                    (batch, timesteps, num_nodes, num_nodes) when use_per_timestep_adj=True
     """
+    # Reconstruct raw wspm (m/s) for the adjacency builder.
+    # X_batch carries StandardScaler-normalised wspm; the tanh(x/5) speed-factor and
+    # the 0.1 m/s calm threshold are calibrated for raw m/s, not z-scores.
+    # The model still receives the scaled value — only the adjacency branch is fixed.
+    wspm_idx   = config['wind_speed_idx']
+    wspm_mean  = config.get('_wspm_mean',  0.0)
+    wspm_scale = config.get('_wspm_scale', 1.0)
+    if wspm_scale != 1.0 or wspm_mean != 0.0:
+        X_adj = X_batch.clone()
+        X_adj[:, :, :, wspm_idx] = (X_batch[:, :, :, wspm_idx] * wspm_scale + wspm_mean).clamp(min=0.0)
+    else:
+        X_adj = X_batch
+
     # Per-timestep adjacency: build a separate A_t for each input timestep.
     # Gradients flow through alpha_override if it is a learnable tensor.
     if config.get('use_per_timestep_adj', False):
         return build_per_timestep_adjacency_gpu(
-            X_batch, config,
+            X_adj, config,
             alpha_override=alpha_override,
             sigma_override=sigma_override,
         )
@@ -692,14 +710,14 @@ def build_dynamic_adjacency(X_batch, config, device, alpha_override=None, sigma_
     # gradients can flow from the loss back through the adjacency construction.
     if X_batch.is_cuda or alpha_override is not None or sigma_override is not None or static_adj_override is not None:
         return build_dynamic_adjacency_gpu(
-            X_batch, config,
+            X_adj, config,
             alpha_override=alpha_override,
             sigma_override=sigma_override,
             static_adj_override=static_adj_override,
         )
 
     # Fallback to CPU version for non-GPU tensors
-    wind_speeds, wind_directions = extract_wind_features(X_batch, config)
+    wind_speeds, wind_directions = extract_wind_features(X_adj, config)
 
     # Build wind-aware adjacency
     adj_batch = build_wind_aware_adjacency_batch(
@@ -811,6 +829,11 @@ def fit_scalers_on_train(X_train, Y_train, config):
     # This includes PM2.5 (idx 0), other pollutants, meteo, and temporal features
     feature_scaler = StandardScaler()
     feature_scaler.fit(X_flat[:, :wind_start_idx])
+
+    # Store wspm inverse-transform stats so build_dynamic_adjacency can recover raw m/s.
+    wspm_idx = config.get('wind_speed_idx', 10)
+    config['_wspm_mean']  = float(feature_scaler.mean_[wspm_idx])
+    config['_wspm_scale'] = float(feature_scaler.scale_[wspm_idx])
 
     # Fit target scaler(s) on Y values (PM2.5 only)
     if config.get('use_per_station_norm', False):
