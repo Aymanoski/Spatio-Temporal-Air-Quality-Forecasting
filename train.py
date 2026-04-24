@@ -218,7 +218,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_rollingmean12',
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_trend',
 
     # Multi-task auxiliary prediction — TRIED AND REJECTED 2026-04-24:
     # lambda=0.1 → test MAE 20.200, RMSE 38.157. Smaller lambda also failed.
@@ -242,7 +242,7 @@ CONFIG = {
     # residual_window=1 → current behavior (last observed value).
     # residual_window=k → mean of last k timesteps used as prior.
     # Try: 3, 6, 12 in separate runs.
-    'residual_window': 12,
+    'residual_window': 1,
 
     # Exp 6: Soft regime conditioning.
     # Injects last PM2.5 (normalized) directly into enc_out before the head via
@@ -253,7 +253,7 @@ CONFIG = {
     # Replaces flat persistence prior with y_last + h * slope_last_6h.
     # slope = (X[-1] - X[-6]) / 5 in normalized space.
     # Only active when use_persistence_residual=True.
-    'use_trend_residual': False,
+    'use_trend_residual': True,
 
     # Learnable static adjacency (TRIED AND REJECTED 2026-04-23):
     # test MAE 19.836 vs baseline 19.813 — statistical tie. Alpha collapsed 0.62→0.21.
