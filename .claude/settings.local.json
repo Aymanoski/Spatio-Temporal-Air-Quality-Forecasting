@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Read(//c/Users/moham/.claude/projects/c--Users-moham-Bachelor/memory/**)"
+      "Read(//c/Users/moham/.claude/projects/c--Users-moham-Bachelor/memory/**)",
+      "Bash(python3 -c ' *)"
     ],
     "additionalDirectories": [
       "c:\\Users\\moham\\.claude\\projects\\c--Users-moham-Bachelor\\memory"

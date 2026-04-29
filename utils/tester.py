@@ -36,12 +36,15 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from models import GCNLSTMModel, GraphTransformerModel
 from train import (
     CONFIG as TRAIN_CONFIG,
+    RevIN,
     build_dynamic_adjacency,
     fit_scalers_on_train,
+    inverse_transform_targets,
     scale_data,
     scale_future_met,
     split_data,
 )
+from utils.window import compute_holiday_feature, create_windows
 from utils.graph import WIND_DIRECTION_MAP
 
 
@@ -87,6 +90,87 @@ BASE_33_FEATURE_COLS = [
 
 ANGLE_FEATURE_COLS = ["wind_dir_sin", "wind_dir_cos"]
 LEGACY_35_FEATURE_COLS = BASE_33_FEATURE_COLS[:17] + ANGLE_FEATURE_COLS + BASE_33_FEATURE_COLS[17:]
+DELTA_FEATURE_COL = "pm25_delta"
+HOLIDAY_FEATURE_COL = "holiday_flag"
+DELTA_34_FEATURE_COLS = BASE_33_FEATURE_COLS[:17] + [DELTA_FEATURE_COL] + BASE_33_FEATURE_COLS[17:]
+HOLIDAY_34_FEATURE_COLS = BASE_33_FEATURE_COLS[:17] + [HOLIDAY_FEATURE_COL] + BASE_33_FEATURE_COLS[17:]
+
+
+def infer_variant_feature(config: dict[str, Any]) -> str | None:
+    if bool(config.get("use_pm25_delta", False)):
+        return DELTA_FEATURE_COL
+    if bool(config.get("use_holiday_feature", False)):
+        return HOLIDAY_FEATURE_COL
+
+    arch_name = str(config.get("architecture_name", "")).lower()
+    if "_delta" in arch_name:
+        return DELTA_FEATURE_COL
+    if "_holiday" in arch_name:
+        return HOLIDAY_FEATURE_COL
+    return None
+
+
+def infer_ffn_dim(checkpoint_config: dict[str, Any], state_dict: dict[str, torch.Tensor], hidden_dim: int) -> int | None:
+    configured = checkpoint_config.get("ffn_dim")
+    if configured is not None:
+        return int(configured)
+
+    for key in (
+        "encoder.transformer.layers.0.linear1.weight",
+        "encoder.transformer.layers.1.linear1.weight",
+    ):
+        weight = state_dict.get(key)
+        if weight is not None and weight.ndim == 2:
+            return int(weight.shape[0])
+
+    default_ffn = TRAIN_CONFIG.get("ffn_dim")
+    if default_ffn is not None:
+        return int(default_ffn)
+
+    # Let model default apply when no explicit width is discoverable.
+    return None
+
+
+def get_window_suffix(config: dict[str, Any]) -> str:
+    if bool(config.get("use_pm25_delta", False)):
+        return "_delta"
+    if bool(config.get("use_holiday_feature", False)):
+        return "_holiday"
+    return ""
+
+
+def build_variant_windows(
+    data_path: Path,
+    input_len: int,
+    horizon: int,
+    use_pm25_delta: bool,
+    use_holiday_feature: bool,
+) -> tuple[np.ndarray, np.ndarray]:
+    data_tensor = np.load(data_path / "data_tensor.npy")
+
+    if use_holiday_feature:
+        metadata = load_processed_metadata(data_path)
+        timestamps = metadata.get("timestamps")
+        if timestamps is None:
+            raise ValueError("metadata.save is missing timestamps required to rebuild holiday windows.")
+        if len(timestamps) != len(data_tensor):
+            raise ValueError(
+                "Timestamp length mismatch while rebuilding holiday windows: "
+                f"{len(timestamps)} != {len(data_tensor)}"
+            )
+
+        holiday = compute_holiday_feature(timestamps)
+        holiday_3d = np.tile(holiday[:, np.newaxis, np.newaxis], (1, data_tensor.shape[1], 1)).astype(np.float32)
+        data_tensor = np.concatenate([data_tensor[:, :, :17], holiday_3d, data_tensor[:, :, 17:]], axis=2)
+
+    X, Y = create_windows(
+        data_tensor,
+        input_len=input_len,
+        horizon=horizon,
+        future_met_indices=None,
+        add_pm25_delta=use_pm25_delta,
+    )
+    return X.astype(np.float32), Y.astype(np.float32)
 
 
 def infer_model_type(checkpoint_config: dict[str, Any], state_dict: dict[str, torch.Tensor]) -> str:
@@ -200,6 +284,13 @@ def build_model_from_config(config: dict[str, Any]) -> torch.nn.Module:
             use_multiscale_temporal=bool(config.get("use_multiscale_temporal", False)),
             local_window=int(config.get("local_window", 6)),
             n_local_layers=int(config.get("n_local_layers", 1)),
+            use_horizon_residual_weights=bool(config.get("use_horizon_residual_weights", False)),
+            use_learnable_static_adj=bool(config.get("use_learnable_static_adj", False)),
+            initial_distance_sigma=float(config.get("distance_sigma", 1800.0)),
+            use_multitask=bool(config.get("use_multitask", False)),
+            n_aux_targets=int(config.get("n_aux_targets", 5)),
+            use_station_horizon_bias=bool(config.get("use_station_horizon_bias", False)),
+            use_regime_conditioning=bool(config.get("use_regime_conditioning", False)),
         )
 
     if model_type == "gcn_lstm":
@@ -259,7 +350,11 @@ def normalize_angle_feature_names(feature_cols: list[str]) -> list[str]:
     return [rename_map.get(col, col) for col in feature_cols]
 
 
-def get_current_feature_cols(data_path: Path, observed_feature_dim: int | None = None) -> list[str]:
+def get_current_feature_cols(
+    data_path: Path,
+    observed_feature_dim: int | None = None,
+    variant_feature: str | None = None,
+) -> list[str]:
     metadata = load_processed_metadata(data_path)
     feature_cols = metadata.get("feature_cols")
 
@@ -273,6 +368,13 @@ def get_current_feature_cols(data_path: Path, observed_feature_dim: int | None =
 
     if observed_feature_dim == len(BASE_33_FEATURE_COLS):
         return list(BASE_33_FEATURE_COLS)
+    if observed_feature_dim == len(DELTA_34_FEATURE_COLS):
+        if variant_feature == DELTA_FEATURE_COL:
+            return list(DELTA_34_FEATURE_COLS)
+        if variant_feature == HOLIDAY_FEATURE_COL:
+            return list(HOLIDAY_34_FEATURE_COLS)
+        # Fallback: preserve input rank even when metadata is unavailable.
+        return list(DELTA_34_FEATURE_COLS)
     if observed_feature_dim == len(LEGACY_35_FEATURE_COLS):
         return list(LEGACY_35_FEATURE_COLS)
     if observed_feature_dim == 19:
@@ -297,6 +399,16 @@ def infer_checkpoint_feature_cols(config: dict[str, Any], current_feature_cols: 
         return list(current_feature_cols)
     if input_dim == 33:
         return list(BASE_33_FEATURE_COLS)
+    if input_dim == 34:
+        variant_feature = infer_variant_feature(config)
+        if variant_feature == DELTA_FEATURE_COL:
+            return list(DELTA_34_FEATURE_COLS)
+        if variant_feature == HOLIDAY_FEATURE_COL:
+            return list(HOLIDAY_34_FEATURE_COLS)
+        raise ValueError(
+            "Cannot disambiguate 34-feature layout for checkpoint. "
+            "Expected use_pm25_delta or use_holiday_feature in config."
+        )
     if input_dim == 35:
         return list(LEGACY_35_FEATURE_COLS)
 
@@ -383,6 +495,11 @@ def prepare_checkpoint_config(checkpoint: dict[str, Any], device: str) -> dict[s
 
     if config["model_type"] == "graph_transformer":
         config["num_tf_layers"] = infer_num_tf_layers(checkpoint_config, state_dict)
+        config["ffn_dim"] = infer_ffn_dim(
+            checkpoint_config,
+            state_dict,
+            hidden_dim=int(config.get("hidden_dim", 64)),
+        )
         if config["graph_conv"] == "gat":
             config["num_gat_layers"] = infer_num_gat_layers(checkpoint_config, state_dict)
 
@@ -417,6 +534,38 @@ def prepare_checkpoint_config(checkpoint: dict[str, Any], device: str) -> dict[s
     if "initial_t24_alpha" in checkpoint_config:
         config["initial_t24_alpha"] = float(checkpoint_config["initial_t24_alpha"])
 
+    # Additional topology flags that must never inherit current TRAIN_CONFIG defaults.
+    config["use_horizon_residual_weights"] = bool(
+        checkpoint_config.get(
+            "use_horizon_residual_weights",
+            "horizon_residual_logits" in state_dict,
+        )
+    )
+    config["use_learnable_static_adj"] = bool(
+        checkpoint_config.get(
+            "use_learnable_static_adj",
+            "static_adj_logits" in state_dict,
+        )
+    )
+    config["use_multitask"] = bool(
+        checkpoint_config.get(
+            "use_multitask",
+            any(key.startswith("aux_head.") for key in state_dict),
+        )
+    )
+    config["use_station_horizon_bias"] = bool(
+        checkpoint_config.get(
+            "use_station_horizon_bias",
+            "station_horizon_bias" in state_dict,
+        )
+    )
+    config["use_regime_conditioning"] = bool(
+        checkpoint_config.get(
+            "use_regime_conditioning",
+            any(key.startswith("regime_proj.") for key in state_dict),
+        )
+    )
+
     # Detect oracle future meteorology from state dict
     config["use_future_met"] = "head.future_met_proj.weight" in state_dict
     if config["use_future_met"]:
@@ -431,6 +580,17 @@ def prepare_checkpoint_config(checkpoint: dict[str, Any], device: str) -> dict[s
     config["use_per_timestep_adj"] = bool(checkpoint_config.get("use_per_timestep_adj", False))
     config["use_physics_guided_adj"] = bool(checkpoint_config.get("use_physics_guided_adj", False))
     config["use_transport_time_weight"] = bool(checkpoint_config.get("use_transport_time_weight", False))
+    config["use_pm25_delta"] = bool(checkpoint_config.get("use_pm25_delta", False))
+    config["use_holiday_feature"] = bool(checkpoint_config.get("use_holiday_feature", False))
+    config["use_per_station_norm"] = bool(checkpoint_config.get("use_per_station_norm", False))
+    config["use_revin"] = bool(checkpoint_config.get("use_revin", False))
+    config["revin_feature_indices"] = list(checkpoint_config.get("revin_feature_indices", [0]))
+    config["residual_window"] = int(checkpoint_config.get("residual_window", 1))
+    config["use_trend_residual"] = bool(checkpoint_config.get("use_trend_residual", False))
+    config["use_multiscale_temporal"] = bool(checkpoint_config.get("use_multiscale_temporal", False))
+    config["local_window"] = int(checkpoint_config.get("local_window", config.get("local_window", 6)))
+    config["n_local_layers"] = int(checkpoint_config.get("n_local_layers", config.get("n_local_layers", 1)))
+    config["met_forecast_mode"] = str(checkpoint_config.get("met_forecast_mode", config.get("met_forecast_mode", "oracle")))
 
     arch_name = str(
         checkpoint_config.get("architecture_name")
@@ -491,8 +651,37 @@ def load_model_for_checkpoint(
 
 
 def load_raw_data(data_path: Path, input_len: int = 24) -> tuple:
-    X = np.load(data_path / "X.npy")
-    Y = np.load(data_path / "Y.npy")
+    X = np.load(data_path / f"X_{input_len}.npy")
+    Y = np.load(data_path / f"Y_{input_len}.npy")
+    adj = np.load(data_path / "adjacency.npy")
+    z_path = data_path / f"Z_{input_len}.npy"
+    Z = np.load(z_path) if z_path.exists() else None
+    return X, Y, adj, Z
+
+
+def load_raw_data_for_config(data_path: Path, config: dict[str, Any]) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]:
+    input_len = int(config.get("input_len", 24))
+    horizon = int(config.get("horizon", 6))
+    suffix = get_window_suffix(config)
+
+    x_path = data_path / f"X_{input_len}{suffix}.npy"
+    y_path = data_path / f"Y_{input_len}{suffix}.npy"
+
+    if x_path.exists() and y_path.exists():
+        X = np.load(x_path)
+        Y = np.load(y_path)
+    elif suffix:
+        X, Y = build_variant_windows(
+            data_path=data_path,
+            input_len=input_len,
+            horizon=horizon,
+            use_pm25_delta=bool(config.get("use_pm25_delta", False)),
+            use_holiday_feature=bool(config.get("use_holiday_feature", False)),
+        )
+    else:
+        X = np.load(data_path / f"X_{input_len}.npy")
+        Y = np.load(data_path / f"Y_{input_len}.npy")
+
     adj = np.load(data_path / "adjacency.npy")
     z_path = data_path / f"Z_{input_len}.npy"
     Z = np.load(z_path) if z_path.exists() else None
@@ -556,10 +745,19 @@ def run_model_predictions(
 ) -> np.ndarray:
     use_wind_adj = config.get("use_wind_adjacency", False)
     use_residual = config.get("use_persistence_residual", False)
+    use_t24 = config.get("use_t24_residual", False)
+    use_revin = config.get("use_revin", False)
+    use_trend_residual = config.get("use_trend_residual", False)
+    use_horizon_residual_weights = config.get("use_horizon_residual_weights", False)
+    use_per_station_norm = config.get("use_per_station_norm", False)
+    residual_window = int(config.get("residual_window", 1))
     target_feature_idx = int(config.get("target_feature_idx", 0))
+    met_cols = list(config.get("future_met_indices", []))
+    met_forecast_mode = str(config.get("met_forecast_mode", "oracle")).lower()
     batch_size = int(config.get("batch_size", 32))
     adj_tensor = torch.as_tensor(adj, dtype=torch.float32, device=device)
     all_preds = []
+    revin = RevIN(config.get("revin_feature_indices", [0])) if use_revin else None
 
     with torch.no_grad():
         for start in range(0, len(X_test), batch_size):
@@ -568,12 +766,14 @@ def run_model_predictions(
             if use_wind_adj:
                 alpha_override = model.get_wind_alpha() if hasattr(model, "get_wind_alpha") else None
                 sigma_override = model.get_distance_sigma() if hasattr(model, "get_distance_sigma") else None
+                static_adj_override = model.get_static_adj() if hasattr(model, "get_static_adj") else None
                 adj_batch = build_dynamic_adjacency(
                     batch_x,
                     config,
                     device,
                     alpha_override=alpha_override,
                     sigma_override=sigma_override,
+                    static_adj_override=static_adj_override,
                 )
             else:
                 adj_batch = adj_tensor
@@ -582,12 +782,50 @@ def run_model_predictions(
             z_batch = None
             if Z_test is not None:
                 z_batch = torch.as_tensor(Z_test[start:start + batch_size], dtype=torch.float32, device=device)
+            elif met_forecast_mode == "persistence" and met_cols:
+                last_met = batch_x[:, -1:, :, met_cols]
+                z_batch = last_met.expand(-1, int(config["horizon"]), -1, -1).contiguous()
 
-            pred = model.predict(batch_x, adj_batch, horizon=config["horizon"], future_met=z_batch)
+            x_model = revin.normalize(batch_x) if revin is not None else batch_x
+            pred = model.predict(x_model, adj_batch, horizon=config["horizon"], future_met=z_batch)
 
             if use_residual:
-                y_last = batch_x[:, -1, :, target_feature_idx]
-                pred = pred + y_last.unsqueeze(1).expand_as(pred)
+                if residual_window > 1:
+                    y_last = x_model[:, -residual_window:, :, target_feature_idx].mean(dim=1)
+                else:
+                    y_last = x_model[:, -1, :, target_feature_idx]
+
+                if use_per_station_norm:
+                    y_last = (
+                        y_last * config["_feat_pm25_scale"]
+                        + config["_feat_pm25_mean"]
+                        - config["_target_means"]
+                    ) / config["_target_scales"]
+
+                if use_trend_residual and x_model.shape[1] >= 6:
+                    slope = (x_model[:, -1, :, target_feature_idx] - x_model[:, -6, :, target_feature_idx]) / 5.0
+                    steps = torch.arange(1, pred.shape[1] + 1, device=x_model.device, dtype=x_model.dtype).view(1, -1, 1)
+                    prior = y_last.unsqueeze(1) + slope.unsqueeze(1) * steps
+                else:
+                    prior = y_last.unsqueeze(1).expand_as(pred)
+
+                if use_horizon_residual_weights and hasattr(model, "get_horizon_residual_weights"):
+                    hw = model.get_horizon_residual_weights()
+                    if hw is not None:
+                        pred = pred + hw.to(device=pred.device, dtype=pred.dtype).view(1, -1, 1) * prior
+                    else:
+                        pred = pred + prior
+                else:
+                    pred = pred + prior
+
+            if revin is not None:
+                pred = revin.denormalize(pred)
+
+            if use_t24 and hasattr(model, "get_t24_alpha"):
+                t24_alpha = model.get_t24_alpha()
+                if t24_alpha is not None:
+                    y_t24 = batch_x[:, 0, :, target_feature_idx]
+                    pred = pred + t24_alpha.to(device=pred.device, dtype=pred.dtype) * y_t24.unsqueeze(1).expand_as(pred)
 
             all_preds.append(pred.detach().cpu().numpy())
 
@@ -603,16 +841,33 @@ def inverse_transform_predictions(
     if target_scaler is None:
         return predictions, targets, False
 
-    orig_shape = predictions.shape
-    predictions_inv = target_scaler.inverse_transform(predictions.reshape(-1, 1)).reshape(orig_shape)
-    targets_inv = target_scaler.inverse_transform(targets.reshape(-1, 1)).reshape(targets.shape)
+    predictions_inv = inverse_transform_targets(predictions, target_scaler)
+    targets_inv = inverse_transform_targets(targets, target_scaler)
 
     # Keep evaluator semantics aligned with train.py compute_metrics/validate.
     if use_log_transform:
         predictions_inv = np.expm1(predictions_inv)
         targets_inv = np.expm1(targets_inv)
+        predictions_inv = np.clip(predictions_inv, 0.0, None)
 
     return predictions_inv, targets_inv, True
+
+
+def set_per_station_residual_tensors(
+    config: dict[str, Any],
+    feature_scaler: Any | None,
+    target_scaler: Any | None,
+    device: str,
+) -> None:
+    if not bool(config.get("use_per_station_norm", False)):
+        return
+    if feature_scaler is None or not isinstance(target_scaler, list):
+        return
+
+    config["_feat_pm25_mean"] = torch.tensor(float(feature_scaler.mean_[0]), dtype=torch.float32, device=device)
+    config["_feat_pm25_scale"] = torch.tensor(float(feature_scaler.scale_[0]), dtype=torch.float32, device=device)
+    config["_target_means"] = torch.tensor([sc.mean_[0] for sc in target_scaler], dtype=torch.float32, device=device)
+    config["_target_scales"] = torch.tensor([sc.scale_[0] for sc in target_scaler], dtype=torch.float32, device=device)
 
 
 def evaluate_checkpoint(
@@ -625,9 +880,13 @@ def evaluate_checkpoint(
     checkpoint = torch.load(checkpoint_path, weights_only=False, map_location="cpu")
     config = prepare_checkpoint_config(checkpoint, device=device)
 
-    input_len = int(config.get("input_len", 24))
-    raw_X, raw_Y, adj, raw_Z = load_raw_data(data_path, input_len=input_len)
-    current_feature_cols = get_current_feature_cols(data_path, observed_feature_dim=int(raw_X.shape[-1]))
+    raw_X, raw_Y, adj, raw_Z = load_raw_data_for_config(data_path, config)
+    variant_feature = infer_variant_feature(config)
+    current_feature_cols = get_current_feature_cols(
+        data_path,
+        observed_feature_dim=int(raw_X.shape[-1]),
+        variant_feature=variant_feature,
+    )
     checkpoint_feature_cols = infer_checkpoint_feature_cols(config, current_feature_cols)
     refresh_feature_config(config, checkpoint_feature_cols)
 
@@ -639,6 +898,7 @@ def evaluate_checkpoint(
     X_test, Y_test = test_data
 
     feature_scaler, target_scaler, already_scaled = fit_scalers_on_train(X_train, Y_train, config)
+    set_per_station_residual_tensors(config, feature_scaler, target_scaler, device)
 
     if already_scaled:
         X_test_scaled = X_test.astype(np.float32)
@@ -710,6 +970,7 @@ def evaluate_checkpoint(
             "graph_conv": config.get("graph_conv"),
             "gat_version": config.get("gat_version"),
             "num_tf_layers": config.get("num_tf_layers"),
+            "ffn_dim": config.get("ffn_dim"),
             "num_gat_layers": config.get("num_gat_layers"),
             "use_direct_decoding": config.get("use_direct_decoding", False),
             "use_wind_adjacency": config.get("use_wind_adjacency", False),
@@ -719,11 +980,23 @@ def evaluate_checkpoint(
             "use_temporal_attention_head": config.get("use_temporal_attention_head", False),
             "use_post_temporal_gat": config.get("use_post_temporal_gat", False),
             "use_t24_residual": config.get("use_t24_residual", False),
+            "use_horizon_residual_weights": config.get("use_horizon_residual_weights", False),
+            "use_learnable_static_adj": config.get("use_learnable_static_adj", False),
+            "use_multitask": config.get("use_multitask", False),
+            "use_station_horizon_bias": config.get("use_station_horizon_bias", False),
+            "use_regime_conditioning": config.get("use_regime_conditioning", False),
             "use_future_met": config.get("use_future_met", False),
+            "met_forecast_mode": config.get("met_forecast_mode"),
             "wind_direction_method": config.get("wind_direction_method"),
             "wind_temporal_graphs": config.get("wind_temporal_graphs", 1),
             "wind_temporal_graph_window": config.get("wind_temporal_graph_window"),
+            "use_pm25_delta": config.get("use_pm25_delta", False),
+            "use_holiday_feature": config.get("use_holiday_feature", False),
             "use_persistence_residual": config.get("use_persistence_residual", False),
+            "use_per_station_norm": config.get("use_per_station_norm", False),
+            "residual_window": config.get("residual_window", 1),
+            "use_trend_residual": config.get("use_trend_residual", False),
+            "use_revin": config.get("use_revin", False),
             "target_feature_idx": config.get("target_feature_idx", 0),
             "use_log_transform": config.get("use_log_transform", False),
             "loss_type": config.get("loss_type"),

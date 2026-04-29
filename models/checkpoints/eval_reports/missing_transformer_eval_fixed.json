@@ -1,0 +1,4768 @@
+{
+  "device": "cpu",
+  "missing": [
+    "graph_transformer_gat_v1_residual_evt_huber_adamw_log1p_wspm_std_T4_best.pt",
+    "graph_transformer_gat_v1_residual_evt_huber_adamw_std_T4_best.pt",
+    "graph_transformer_gat_v1_residual_log1p_T4_best.pt",
+    "graph_transformer_gat_v1_residual_log1p_all_T4_best.pt",
+    "graph_transformer_gat_v1_residual_log1p_all_rain_std_T4_best.pt",
+    "graph_transformer_gat_v1_residual_log1p_all_std_T4_best.pt",
+    "graph_transformer_gat_v1_residual_log1p_all_std_corrAdj_T4_best.pt",
+    "graph_transformer_gat_v1_residual_log1p_all_std_cosine_s42_T4_best.pt",
+    "graph_transformer_gat_v1_residual_log1p_all_std_delta_T4_best.pt",
+    "graph_transformer_gat_v1_residual_log1p_all_std_ffn4x_T4_best.pt",
+    "graph_transformer_gat_v1_residual_log1p_all_std_holiday_T4_best.pt",
+    "graph_transformer_gat_v1_residual_log1p_all_std_learnAdj_T4_best.pt",
+    "graph_transformer_gat_v1_residual_log1p_all_std_lrmae_T4_best.pt",
+    "graph_transformer_gat_v1_residual_log1p_all_std_multitask_T4_best.pt",
+    "graph_transformer_gat_v1_residual_log1p_all_std_noise_T4_best.pt",
+    "graph_transformer_gat_v1_residual_log1p_all_std_perstation_T4_best.pt",
+    "graph_transformer_gat_v1_residual_log1p_all_std_stationbias_T4_best.pt",
+    "graph_transformer_gat_v1_residual_log1p_all_std_stationbias_regime_T4_best.pt",
+    "graph_transformer_gat_v1_residual_log1p_all_std_stationbias_revin_T4_best.pt",
+    "graph_transformer_gat_v1_residual_log1p_all_std_stationbias_rollingmean_T4_best.pt",
+    "graph_transformer_gat_v1_residual_log1p_all_std_stationbias_trend_T4_best.pt",
+    "graph_transformer_gat_v1_residual_metpred_T4_best.pt",
+    "graph_transformer_gat_v1_residual_multiscale_T4_best.pt",
+    "graph_transformer_gat_v1_residual_pertstep_T4_best.pt",
+    "graph_transformer_gat_v1_residual_plume_T4_best.pt",
+    "graph_transformer_gat_v1_residual_transport_T4_best.pt"
+  ],
+  "results": [
+    {
+      "checkpoint": "models/checkpoints/transformer/graph_transformer_gat_v1_residual_evt_huber_adamw_log1p_wspm_std_T4_best.pt",
+      "file_name": "graph_transformer_gat_v1_residual_evt_huber_adamw_log1p_wspm_std_T4_best.pt",
+      "architecture_name": "graph_transformer_gat_v1_residual_evt_huber_adamw_log1p_wspm_std",
+      "epoch": 6,
+      "val_loss": 0.0977129641694553,
+      "val_mae": 18.127687454223633,
+      "device_used": "cpu",
+      "input_dim": 33,
+      "used_feature_cols": [
+        "pm2.5",
+        "pm10",
+        "so2",
+        "no2",
+        "co",
+        "o3",
+        "temp",
+        "pres",
+        "dewp",
+        "rain",
+        "wspm",
+        "hour_sin",
+        "hour_cos",
+        "month_sin",
+        "month_cos",
+        "weekday_sin",
+        "weekday_cos",
+        "wd_E",
+        "wd_ENE",
+        "wd_ESE",
+        "wd_N",
+        "wd_NE",
+        "wd_NNE",
+        "wd_NNW",
+        "wd_NW",
+        "wd_S",
+        "wd_SE",
+        "wd_SSE",
+        "wd_SSW",
+        "wd_SW",
+        "wd_W",
+        "wd_WNW",
+        "wd_WSW"
+      ],
+      "config": {
+        "model_type": "graph_transformer",
+        "graph_conv": "gat",
+        "gat_version": "v1",
+        "num_tf_layers": 2,
+        "ffn_dim": 128,
+        "num_gat_layers": 1,
+        "use_direct_decoding": true,
+        "use_wind_adjacency": true,
+        "use_learnable_alpha_gate": true,
+        "use_learnable_sigma": false,
+        "use_node_embeddings": true,
+        "use_temporal_attention_head": false,
+        "use_post_temporal_gat": false,
+        "use_t24_residual": false,
+        "use_horizon_residual_weights": false,
+        "use_learnable_static_adj": false,
+        "use_multitask": false,
+        "use_station_horizon_bias": false,
+        "use_regime_conditioning": false,
+        "use_future_met": false,
+        "met_forecast_mode": "oracle",
+        "wind_direction_method": "circular",
+        "wind_temporal_graphs": 1,
+        "wind_temporal_graph_window": null,
+        "use_pm25_delta": false,
+        "use_holiday_feature": false,
+        "use_persistence_residual": true,
+        "use_per_station_norm": false,
+        "residual_window": 1,
+        "use_trend_residual": false,
+        "use_revin": false,
+        "target_feature_idx": 0,
+        "use_log_transform": true,
+        "loss_type": "evt_hybrid"
+      },
+      "load_info": {
+        "missing_keys": [],
+        "unexpected_keys": [],
+        "partial_load": false
+      },
+      "learned_wind_alpha": 0.45784807205200195,
+      "learned_distance_sigma": null,
+      "is_original_scale": true,
+      "overall": {
+        "RMSE": 38.2180061340332,
+        "MAE": 19.922218322753906,
+        "MAPE": 36.98674392700195,
+        "R2": 0.8291012644767761,
+        "horizon_mae": [
+          9.866985321044922,
+          15.089098930358887,
+          18.94587516784668,
+          22.30691909790039,
+          25.282669067382812,
+          28.041757583618164
+        ]
+      },
+      "horizon_metrics": [
+        {
+          "horizon": 1,
+          "RMSE": 19.311304092407227,
+          "MAE": 9.866985321044922,
+          "MAPE": 17.63193702697754
+        },
+        {
+          "horizon": 2,
+          "RMSE": 29.00010871887207,
+          "MAE": 15.089098930358887,
+          "MAPE": 25.587326049804688
+        },
+        {
+          "horizon": 3,
+          "RMSE": 35.6527099609375,
+          "MAE": 18.94587516784668,
+          "MAPE": 32.68869400024414
+        },
+        {
+          "horizon": 4,
+          "RMSE": 41.146759033203125,
+          "MAE": 22.30691909790039,
+          "MAPE": 40.374366760253906
+        },
+        {
+          "horizon": 5,
+          "RMSE": 45.754817962646484,
+          "MAE": 25.282669067382812,
+          "MAPE": 48.51845932006836
+        },
+        {
+          "horizon": 6,
+          "RMSE": 49.92082214355469,
+          "MAE": 28.041757583618164,
+          "MAPE": 57.11966323852539
+        }
+      ],
+      "station_metrics_best3": [
+        {
+          "station": "Huairou",
+          "RMSE": 30.76403045654297,
+          "MAE": 15.649611473083496,
+          "MAPE": 32.765846252441406
+        },
+        {
+          "station": "Dingling",
+          "RMSE": 34.15757751464844,
+          "MAE": 16.82962989807129,
+          "MAPE": 41.759315490722656
+        },
+        {
+          "station": "Changping",
+          "RMSE": 34.7538948059082,
+          "MAE": 17.93790054321289,
+          "MAPE": 40.977787017822266
+        }
+      ],
+      "station_metrics_worst3": [
+        {
+          "station": "Dongsi",
+          "RMSE": 42.23660659790039,
+          "MAE": 22.626184463500977,
+          "MAPE": 36.670833587646484
+        },
+        {
+          "station": "Wanshouxigong",
+          "RMSE": 42.82199478149414,
+          "MAE": 22.241031646728516,
+          "MAPE": 35.36724090576172
+        },
+        {
+          "station": "Nongzhanguan",
+          "RMSE": 39.89436340332031,
+          "MAE": 21.479812622070312,
+          "MAPE": 36.15920639038086
+        }
+      ],
+      "trainable_params": 80322
+    },
+    {
+      "checkpoint": "models/checkpoints/transformer/graph_transformer_gat_v1_residual_evt_huber_adamw_std_T4_best.pt",
+      "file_name": "graph_transformer_gat_v1_residual_evt_huber_adamw_std_T4_best.pt",
+      "architecture_name": "graph_transformer_gat_v1_residual_evt_huber_adamw_std",
+      "epoch": 5,
+      "val_loss": 0.09987648465303761,
+      "val_mae": 17.97925567626953,
+      "device_used": "cpu",
+      "input_dim": 33,
+      "used_feature_cols": [
+        "pm2.5",
+        "pm10",
+        "so2",
+        "no2",
+        "co",
+        "o3",
+        "temp",
+        "pres",
+        "dewp",
+        "rain",
+        "wspm",
+        "hour_sin",
+        "hour_cos",
+        "month_sin",
+        "month_cos",
+        "weekday_sin",
+        "weekday_cos",
+        "wd_E",
+        "wd_ENE",
+        "wd_ESE",
+        "wd_N",
+        "wd_NE",
+        "wd_NNE",
+        "wd_NNW",
+        "wd_NW",
+        "wd_S",
+        "wd_SE",
+        "wd_SSE",
+        "wd_SSW",
+        "wd_SW",
+        "wd_W",
+        "wd_WNW",
+        "wd_WSW"
+      ],
+      "config": {
+        "model_type": "graph_transformer",
+        "graph_conv": "gat",
+        "gat_version": "v1",
+        "num_tf_layers": 2,
+        "ffn_dim": 128,
+        "num_gat_layers": 1,
+        "use_direct_decoding": true,
+        "use_wind_adjacency": true,
+        "use_learnable_alpha_gate": true,
+        "use_learnable_sigma": false,
+        "use_node_embeddings": true,
+        "use_temporal_attention_head": false,
+        "use_post_temporal_gat": false,
+        "use_t24_residual": false,
+        "use_horizon_residual_weights": false,
+        "use_learnable_static_adj": false,
+        "use_multitask": false,
+        "use_station_horizon_bias": false,
+        "use_regime_conditioning": false,
+        "use_future_met": false,
+        "met_forecast_mode": "oracle",
+        "wind_direction_method": "circular",
+        "wind_temporal_graphs": 1,
+        "wind_temporal_graph_window": null,
+        "use_pm25_delta": false,
+        "use_holiday_feature": false,
+        "use_persistence_residual": true,
+        "use_per_station_norm": false,
+        "residual_window": 1,
+        "use_trend_residual": false,
+        "use_revin": false,
+        "target_feature_idx": 0,
+        "use_log_transform": true,
+        "loss_type": "evt_hybrid"
+      },
+      "load_info": {
+        "missing_keys": [],
+        "unexpected_keys": [],
+        "partial_load": false
+      },
+      "learned_wind_alpha": 0.4985050559043884,
+      "learned_distance_sigma": null,
+      "is_original_scale": true,
+      "overall": {
+        "RMSE": 38.207401275634766,
+        "MAE": 19.977842330932617,
+        "MAPE": 35.6238899230957,
+        "R2": 0.8291960954666138,
+        "horizon_mae": [
+          9.950227737426758,
+          15.157546043395996,
+          19.020889282226562,
+          22.35361099243164,
+          25.306575775146484,
+          28.078195571899414
+        ]
+      },
+      "horizon_metrics": [
+        {
+          "horizon": 1,
+          "RMSE": 19.182167053222656,
+          "MAE": 9.950227737426758,
+          "MAPE": 17.916959762573242
+        },
+        {
+          "horizon": 2,
+          "RMSE": 28.790918350219727,
+          "MAE": 15.157546043395996,
+          "MAPE": 25.398380279541016
+        },
+        {
+          "horizon": 3,
+          "RMSE": 35.477447509765625,
+          "MAE": 19.020889282226562,
+          "MAPE": 31.9581298828125
+        },
+        {
+          "horizon": 4,
+          "RMSE": 41.06918716430664,
+          "MAE": 22.35361099243164,
+          "MAPE": 38.819053649902344
+        },
+        {
+          "horizon": 5,
+          "RMSE": 45.83943557739258,
+          "MAE": 25.306575775146484,
+          "MAPE": 46.083499908447266
+        },
+        {
+          "horizon": 6,
+          "RMSE": 50.1535530090332,
+          "MAE": 28.078195571899414,
+          "MAPE": 53.56730651855469
+        }
+      ],
+      "station_metrics_best3": [
+        {
+          "station": "Huairou",
+          "RMSE": 30.6813907623291,
+          "MAE": 15.421645164489746,
+          "MAPE": 31.61084747314453
+        },
+        {
+          "station": "Dingling",
+          "RMSE": 34.392704010009766,
+          "MAE": 17.165210723876953,
+          "MAPE": 41.71623611450195
+        },
+        {
+          "station": "Changping",
+          "RMSE": 34.482704162597656,
+          "MAE": 17.820022583007812,
+          "MAPE": 40.075401306152344
+        }
+      ],
+      "station_metrics_worst3": [
+        {
+          "station": "Dongsi",
+          "RMSE": 42.46259307861328,
+          "MAE": 22.716012954711914,
+          "MAPE": 34.66254425048828
+        },
+        {
+          "station": "Wanshouxigong",
+          "RMSE": 43.37290573120117,
+          "MAE": 22.645187377929688,
+          "MAPE": 33.408878326416016
+        },
+        {
+          "station": "Gucheng",
+          "RMSE": 42.48887252807617,
+          "MAE": 21.605289459228516,
+          "MAPE": 37.95737075805664
+        }
+      ],
+      "trainable_params": 80322
+    },
+    {
+      "checkpoint": "models/checkpoints/transformer/graph_transformer_gat_v1_residual_log1p_T4_best.pt",
+      "file_name": "graph_transformer_gat_v1_residual_log1p_T4_best.pt",
+      "architecture_name": "graph_transformer_gat_v1_residual_log1p",
+      "epoch": 40,
+      "val_loss": 0.0069570250248282475,
+      "val_mae": 17.816396713256836,
+      "device_used": "cpu",
+      "input_dim": 33,
+      "used_feature_cols": [
+        "pm2.5",
+        "pm10",
+        "so2",
+        "no2",
+        "co",
+        "o3",
+        "temp",
+        "pres",
+        "dewp",
+        "rain",
+        "wspm",
+        "hour_sin",
+        "hour_cos",
+        "month_sin",
+        "month_cos",
+        "weekday_sin",
+        "weekday_cos",
+        "wd_E",
+        "wd_ENE",
+        "wd_ESE",
+        "wd_N",
+        "wd_NE",
+        "wd_NNE",
+        "wd_NNW",
+        "wd_NW",
+        "wd_S",
+        "wd_SE",
+        "wd_SSE",
+        "wd_SSW",
+        "wd_SW",
+        "wd_W",
+        "wd_WNW",
+        "wd_WSW"
+      ],
+      "config": {
+        "model_type": "graph_transformer",
+        "graph_conv": "gat",
+        "gat_version": "v1",
+        "num_tf_layers": 2,
+        "ffn_dim": 128,
+        "num_gat_layers": 1,
+        "use_direct_decoding": true,
+        "use_wind_adjacency": true,
+        "use_learnable_alpha_gate": true,
+        "use_learnable_sigma": false,
+        "use_node_embeddings": true,
+        "use_temporal_attention_head": false,
+        "use_post_temporal_gat": false,
+        "use_t24_residual": false,
+        "use_horizon_residual_weights": false,
+        "use_learnable_static_adj": false,
+        "use_multitask": false,
+        "use_station_horizon_bias": false,
+        "use_regime_conditioning": false,
+        "use_future_met": false,
+        "met_forecast_mode": "oracle",
+        "wind_direction_method": "circular",
+        "wind_temporal_graphs": 1,
+        "wind_temporal_graph_window": null,
+        "use_pm25_delta": false,
+        "use_holiday_feature": false,
+        "use_persistence_residual": true,
+        "use_per_station_norm": false,
+        "residual_window": 1,
+        "use_trend_residual": false,
+        "use_revin": false,
+        "target_feature_idx": 0,
+        "use_log_transform": true,
+        "loss_type": "evt_hybrid"
+      },
+      "load_info": {
+        "missing_keys": [],
+        "unexpected_keys": [],
+        "partial_load": false
+      },
+      "learned_wind_alpha": 0.4957125186920166,
+      "learned_distance_sigma": null,
+      "is_original_scale": true,
+      "overall": {
+        "RMSE": 42.949214935302734,
+        "MAE": 23.478538513183594,
+        "MAPE": 49.82158660888672,
+        "R2": 0.7841692566871643,
+        "horizon_mae": [
+          11.269107818603516,
+          17.68315887451172,
+          22.54410743713379,
+          26.557836532592773,
+          29.935415267944336,
+          32.88161087036133
+        ]
+      },
+      "horizon_metrics": [
+        {
+          "horizon": 1,
+          "RMSE": 21.31015396118164,
+          "MAE": 11.269107818603516,
+          "MAPE": 22.066736221313477
+        },
+        {
+          "horizon": 2,
+          "RMSE": 32.527767181396484,
+          "MAE": 17.68315887451172,
+          "MAPE": 34.40761184692383
+        },
+        {
+          "horizon": 3,
+          "RMSE": 40.324302673339844,
+          "MAE": 22.54410743713379,
+          "MAPE": 45.289451599121094
+        },
+        {
+          "horizon": 4,
+          "RMSE": 46.48279571533203,
+          "MAE": 26.557836532592773,
+          "MAPE": 55.83318328857422
+        },
+        {
+          "horizon": 5,
+          "RMSE": 51.50349044799805,
+          "MAE": 29.935415267944336,
+          "MAPE": 65.931640625
+        },
+        {
+          "horizon": 6,
+          "RMSE": 55.82403564453125,
+          "MAE": 32.88161087036133,
+          "MAPE": 75.40088653564453
+        }
+      ],
+      "station_metrics_best3": [
+        {
+          "station": "Dingling",
+          "RMSE": 34.552940368652344,
+          "MAE": 18.20684242248535,
+          "MAPE": 47.59346389770508
+        },
+        {
+          "station": "Huairou",
+          "RMSE": 34.83881378173828,
+          "MAE": 18.244903564453125,
+          "MAPE": 44.58070373535156
+        },
+        {
+          "station": "Changping",
+          "RMSE": 37.57062911987305,
+          "MAE": 20.511871337890625,
+          "MAPE": 51.914363861083984
+        }
+      ],
+      "station_metrics_worst3": [
+        {
+          "station": "Dongsi",
+          "RMSE": 48.826194763183594,
+          "MAE": 27.053911209106445,
+          "MAPE": 50.29317855834961
+        },
+        {
+          "station": "Wanshouxigong",
+          "RMSE": 48.115089416503906,
+          "MAE": 26.545223236083984,
+          "MAPE": 50.617183685302734
+        },
+        {
+          "station": "Nongzhanguan",
+          "RMSE": 46.04878616333008,
+          "MAE": 25.788408279418945,
+          "MAPE": 50.64759826660156
+        }
+      ],
+      "trainable_params": 80322
+    },
+    {
+      "checkpoint": "models/checkpoints/transformer/graph_transformer_gat_v1_residual_log1p_all_T4_best.pt",
+      "file_name": "graph_transformer_gat_v1_residual_log1p_all_T4_best.pt",
+      "architecture_name": "graph_transformer_gat_v1_residual_log1p_all",
+      "epoch": 42,
+      "val_loss": 0.006999141168357296,
+      "val_mae": 17.8606014251709,
+      "device_used": "cpu",
+      "input_dim": 33,
+      "used_feature_cols": [
+        "pm2.5",
+        "pm10",
+        "so2",
+        "no2",
+        "co",
+        "o3",
+        "temp",
+        "pres",
+        "dewp",
+        "rain",
+        "wspm",
+        "hour_sin",
+        "hour_cos",
+        "month_sin",
+        "month_cos",
+        "weekday_sin",
+        "weekday_cos",
+        "wd_E",
+        "wd_ENE",
+        "wd_ESE",
+        "wd_N",
+        "wd_NE",
+        "wd_NNE",
+        "wd_NNW",
+        "wd_NW",
+        "wd_S",
+        "wd_SE",
+        "wd_SSE",
+        "wd_SSW",
+        "wd_SW",
+        "wd_W",
+        "wd_WNW",
+        "wd_WSW"
+      ],
+      "config": {
+        "model_type": "graph_transformer",
+        "graph_conv": "gat",
+        "gat_version": "v1",
+        "num_tf_layers": 2,
+        "ffn_dim": 128,
+        "num_gat_layers": 1,
+        "use_direct_decoding": true,
+        "use_wind_adjacency": true,
+        "use_learnable_alpha_gate": true,
+        "use_learnable_sigma": false,
+        "use_node_embeddings": true,
+        "use_temporal_attention_head": false,
+        "use_post_temporal_gat": false,
+        "use_t24_residual": false,
+        "use_horizon_residual_weights": false,
+        "use_learnable_static_adj": false,
+        "use_multitask": false,
+        "use_station_horizon_bias": false,
+        "use_regime_conditioning": false,
+        "use_future_met": false,
+        "met_forecast_mode": "oracle",
+        "wind_direction_method": "circular",
+        "wind_temporal_graphs": 1,
+        "wind_temporal_graph_window": null,
+        "use_pm25_delta": false,
+        "use_holiday_feature": false,
+        "use_persistence_residual": true,
+        "use_per_station_norm": false,
+        "residual_window": 1,
+        "use_trend_residual": false,
+        "use_revin": false,
+        "target_feature_idx": 0,
+        "use_log_transform": true,
+        "loss_type": "evt_hybrid"
+      },
+      "load_info": {
+        "missing_keys": [],
+        "unexpected_keys": [],
+        "partial_load": false
+      },
+      "learned_wind_alpha": 0.503944993019104,
+      "learned_distance_sigma": null,
+      "is_original_scale": true,
+      "overall": {
+        "RMSE": 42.75410842895508,
+        "MAE": 23.47869110107422,
+        "MAPE": 50.5566520690918,
+        "R2": 0.7861257195472717,
+        "horizon_mae": [
+          11.187198638916016,
+          17.65001106262207,
+          22.556922912597656,
+          26.598241806030273,
+          29.971473693847656,
+          32.908302307128906
+        ]
+      },
+      "horizon_metrics": [
+        {
+          "horizon": 1,
+          "RMSE": 21.117660522460938,
+          "MAE": 11.187198638916016,
+          "MAPE": 22.534175872802734
+        },
+        {
+          "horizon": 2,
+          "RMSE": 32.32831573486328,
+          "MAE": 17.65001106262207,
+          "MAPE": 35.1214599609375
+        },
+        {
+          "horizon": 3,
+          "RMSE": 40.13320541381836,
+          "MAE": 22.556922912597656,
+          "MAPE": 46.14358901977539
+        },
+        {
+          "horizon": 4,
+          "RMSE": 46.296146392822266,
+          "MAE": 26.598241806030273,
+          "MAPE": 56.71868896484375
+        },
+        {
+          "horizon": 5,
+          "RMSE": 51.297237396240234,
+          "MAE": 29.971473693847656,
+          "MAPE": 66.7197265625
+        },
+        {
+          "horizon": 6,
+          "RMSE": 55.5966911315918,
+          "MAE": 32.908302307128906,
+          "MAPE": 76.10227966308594
+        }
+      ],
+      "station_metrics_best3": [
+        {
+          "station": "Dingling",
+          "RMSE": 34.65398025512695,
+          "MAE": 18.412864685058594,
+          "MAPE": 48.73937225341797
+        },
+        {
+          "station": "Huairou",
+          "RMSE": 35.117271423339844,
+          "MAE": 18.570594787597656,
+          "MAPE": 46.14772415161133
+        },
+        {
+          "station": "Changping",
+          "RMSE": 37.49954605102539,
+          "MAE": 20.545808792114258,
+          "MAPE": 51.939571380615234
+        }
+      ],
+      "station_metrics_worst3": [
+        {
+          "station": "Dongsi",
+          "RMSE": 48.47292709350586,
+          "MAE": 26.989377975463867,
+          "MAPE": 51.03791427612305
+        },
+        {
+          "station": "Wanshouxigong",
+          "RMSE": 47.83580780029297,
+          "MAE": 26.504308700561523,
+          "MAPE": 51.675994873046875
+        },
+        {
+          "station": "Nongzhanguan",
+          "RMSE": 45.625953674316406,
+          "MAE": 25.633764266967773,
+          "MAPE": 51.08329772949219
+        }
+      ],
+      "trainable_params": 80322
+    },
+    {
+      "checkpoint": "models/checkpoints/transformer/graph_transformer_gat_v1_residual_log1p_all_rain_std_T4_best.pt",
+      "file_name": "graph_transformer_gat_v1_residual_log1p_all_rain_std_T4_best.pt",
+      "architecture_name": "graph_transformer_gat_v1_residual_log1p_all_rain_std",
+      "epoch": 6,
+      "val_loss": 0.19800554589565955,
+      "val_mae": 18.28553009033203,
+      "device_used": "cpu",
+      "input_dim": 33,
+      "used_feature_cols": [
+        "pm2.5",
+        "pm10",
+        "so2",
+        "no2",
+        "co",
+        "o3",
+        "temp",
+        "pres",
+        "dewp",
+        "rain",
+        "wspm",
+        "hour_sin",
+        "hour_cos",
+        "month_sin",
+        "month_cos",
+        "weekday_sin",
+        "weekday_cos",
+        "wd_E",
+        "wd_ENE",
+        "wd_ESE",
+        "wd_N",
+        "wd_NE",
+        "wd_NNE",
+        "wd_NNW",
+        "wd_NW",
+        "wd_S",
+        "wd_SE",
+        "wd_SSE",
+        "wd_SSW",
+        "wd_SW",
+        "wd_W",
+        "wd_WNW",
+        "wd_WSW"
+      ],
+      "config": {
+        "model_type": "graph_transformer",
+        "graph_conv": "gat",
+        "gat_version": "v1",
+        "num_tf_layers": 2,
+        "ffn_dim": 128,
+        "num_gat_layers": 1,
+        "use_direct_decoding": true,
+        "use_wind_adjacency": true,
+        "use_learnable_alpha_gate": true,
+        "use_learnable_sigma": false,
+        "use_node_embeddings": true,
+        "use_temporal_attention_head": false,
+        "use_post_temporal_gat": false,
+        "use_t24_residual": false,
+        "use_horizon_residual_weights": false,
+        "use_learnable_static_adj": false,
+        "use_multitask": false,
+        "use_station_horizon_bias": false,
+        "use_regime_conditioning": false,
+        "use_future_met": false,
+        "met_forecast_mode": "oracle",
+        "wind_direction_method": "circular",
+        "wind_temporal_graphs": 1,
+        "wind_temporal_graph_window": null,
+        "use_pm25_delta": false,
+        "use_holiday_feature": false,
+        "use_persistence_residual": true,
+        "use_per_station_norm": false,
+        "residual_window": 1,
+        "use_trend_residual": false,
+        "use_revin": false,
+        "target_feature_idx": 0,
+        "use_log_transform": true,
+        "loss_type": "evt_hybrid"
+      },
+      "load_info": {
+        "missing_keys": [],
+        "unexpected_keys": [],
+        "partial_load": false
+      },
+      "learned_wind_alpha": 0.43512415885925293,
+      "learned_distance_sigma": null,
+      "is_original_scale": true,
+      "overall": {
+        "RMSE": 37.743343353271484,
+        "MAE": 19.944046020507812,
+        "MAPE": 36.49928665161133,
+        "R2": 0.8333199620246887,
+        "horizon_mae": [
+          10.049812316894531,
+          15.127806663513184,
+          18.90815544128418,
+          22.25079345703125,
+          25.272113800048828,
+          28.055601119995117
+        ]
+      },
+      "horizon_metrics": [
+        {
+          "horizon": 1,
+          "RMSE": 19.56390953063965,
+          "MAE": 10.049812316894531,
+          "MAPE": 17.83728790283203
+        },
+        {
+          "horizon": 2,
+          "RMSE": 28.875192642211914,
+          "MAE": 15.127806663513184,
+          "MAPE": 25.626785278320312
+        },
+        {
+          "horizon": 3,
+          "RMSE": 35.18154525756836,
+          "MAE": 18.90815544128418,
+          "MAPE": 32.61571502685547
+        },
+        {
+          "horizon": 4,
+          "RMSE": 40.43168258666992,
+          "MAE": 22.25079345703125,
+          "MAPE": 40.0653190612793
+        },
+        {
+          "horizon": 5,
+          "RMSE": 45.049739837646484,
+          "MAE": 25.272113800048828,
+          "MAPE": 47.52639389038086
+        },
+        {
+          "horizon": 6,
+          "RMSE": 49.28382110595703,
+          "MAE": 28.055601119995117,
+          "MAPE": 55.32420349121094
+        }
+      ],
+      "station_metrics_best3": [
+        {
+          "station": "Huairou",
+          "RMSE": 30.618389129638672,
+          "MAE": 15.648841857910156,
+          "MAPE": 32.47725296020508
+        },
+        {
+          "station": "Dingling",
+          "RMSE": 34.076194763183594,
+          "MAE": 17.272741317749023,
+          "MAPE": 41.113643646240234
+        },
+        {
+          "station": "Changping",
+          "RMSE": 34.43067932128906,
+          "MAE": 18.041324615478516,
+          "MAPE": 39.31328201293945
+        }
+      ],
+      "station_metrics_worst3": [
+        {
+          "station": "Dongsi",
+          "RMSE": 41.35405731201172,
+          "MAE": 22.475553512573242,
+          "MAPE": 36.244266510009766
+        },
+        {
+          "station": "Wanshouxigong",
+          "RMSE": 42.30980682373047,
+          "MAE": 22.223344802856445,
+          "MAPE": 34.903316497802734
+        },
+        {
+          "station": "Gucheng",
+          "RMSE": 41.81051254272461,
+          "MAE": 21.381547927856445,
+          "MAPE": 39.230140686035156
+        }
+      ],
+      "trainable_params": 80322
+    },
+    {
+      "checkpoint": "models/checkpoints/transformer/graph_transformer_gat_v1_residual_log1p_all_std_T4_best.pt",
+      "file_name": "graph_transformer_gat_v1_residual_log1p_all_std_T4_best.pt",
+      "architecture_name": "graph_transformer_gat_v1_residual_log1p_all_std",
+      "epoch": 6,
+      "val_loss": 0.19762629497457634,
+      "val_mae": 18.221210479736328,
+      "device_used": "cpu",
+      "input_dim": 33,
+      "used_feature_cols": [
+        "pm2.5",
+        "pm10",
+        "so2",
+        "no2",
+        "co",
+        "o3",
+        "temp",
+        "pres",
+        "dewp",
+        "rain",
+        "wspm",
+        "hour_sin",
+        "hour_cos",
+        "month_sin",
+        "month_cos",
+        "weekday_sin",
+        "weekday_cos",
+        "wd_E",
+        "wd_ENE",
+        "wd_ESE",
+        "wd_N",
+        "wd_NE",
+        "wd_NNE",
+        "wd_NNW",
+        "wd_NW",
+        "wd_S",
+        "wd_SE",
+        "wd_SSE",
+        "wd_SSW",
+        "wd_SW",
+        "wd_W",
+        "wd_WNW",
+        "wd_WSW"
+      ],
+      "config": {
+        "model_type": "graph_transformer",
+        "graph_conv": "gat",
+        "gat_version": "v1",
+        "num_tf_layers": 2,
+        "ffn_dim": 128,
+        "num_gat_layers": 1,
+        "use_direct_decoding": true,
+        "use_wind_adjacency": true,
+        "use_learnable_alpha_gate": true,
+        "use_learnable_sigma": false,
+        "use_node_embeddings": true,
+        "use_temporal_attention_head": false,
+        "use_post_temporal_gat": false,
+        "use_t24_residual": false,
+        "use_horizon_residual_weights": false,
+        "use_learnable_static_adj": false,
+        "use_multitask": false,
+        "use_station_horizon_bias": false,
+        "use_regime_conditioning": false,
+        "use_future_met": false,
+        "met_forecast_mode": "oracle",
+        "wind_direction_method": "circular",
+        "wind_temporal_graphs": 1,
+        "wind_temporal_graph_window": null,
+        "use_pm25_delta": false,
+        "use_holiday_feature": false,
+        "use_persistence_residual": true,
+        "use_per_station_norm": false,
+        "residual_window": 1,
+        "use_trend_residual": false,
+        "use_revin": false,
+        "target_feature_idx": 0,
+        "use_log_transform": true,
+        "loss_type": "evt_hybrid"
+      },
+      "load_info": {
+        "missing_keys": [],
+        "unexpected_keys": [],
+        "partial_load": false
+      },
+      "learned_wind_alpha": 0.4355076849460602,
+      "learned_distance_sigma": null,
+      "is_original_scale": true,
+      "overall": {
+        "RMSE": 37.50847625732422,
+        "MAE": 19.814979553222656,
+        "MAPE": 36.61723327636719,
+        "R2": 0.8353879451751709,
+        "horizon_mae": [
+          10.078868865966797,
+          15.092658042907715,
+          18.81820297241211,
+          22.09673309326172,
+          25.053104400634766,
+          27.75030517578125
+        ]
+      },
+      "horizon_metrics": [
+        {
+          "horizon": 1,
+          "RMSE": 19.614761352539062,
+          "MAE": 10.078868865966797,
+          "MAPE": 17.847261428833008
+        },
+        {
+          "horizon": 2,
+          "RMSE": 28.84421157836914,
+          "MAE": 15.092658042907715,
+          "MAPE": 25.60055160522461
+        },
+        {
+          "horizon": 3,
+          "RMSE": 35.06520462036133,
+          "MAE": 18.81820297241211,
+          "MAPE": 32.626285552978516
+        },
+        {
+          "horizon": 4,
+          "RMSE": 40.22384262084961,
+          "MAE": 22.09673309326172,
+          "MAPE": 40.134220123291016
+        },
+        {
+          "horizon": 5,
+          "RMSE": 44.713783264160156,
+          "MAE": 25.053104400634766,
+          "MAPE": 47.74457931518555
+        },
+        {
+          "horizon": 6,
+          "RMSE": 48.762062072753906,
+          "MAE": 27.75030517578125,
+          "MAPE": 55.750511169433594
+        }
+      ],
+      "station_metrics_best3": [
+        {
+          "station": "Huairou",
+          "RMSE": 30.55144691467285,
+          "MAE": 15.608532905578613,
+          "MAPE": 32.347904205322266
+        },
+        {
+          "station": "Dingling",
+          "RMSE": 33.82796096801758,
+          "MAE": 17.042709350585938,
+          "MAPE": 41.22796630859375
+        },
+        {
+          "station": "Changping",
+          "RMSE": 34.11797332763672,
+          "MAE": 17.936254501342773,
+          "MAPE": 39.562625885009766
+        }
+      ],
+      "station_metrics_worst3": [
+        {
+          "station": "Dongsi",
+          "RMSE": 41.00859832763672,
+          "MAE": 22.283418655395508,
+          "MAPE": 36.216068267822266
+        },
+        {
+          "station": "Wanshouxigong",
+          "RMSE": 42.18120574951172,
+          "MAE": 22.09694480895996,
+          "MAPE": 35.15388488769531
+        },
+        {
+          "station": "Gucheng",
+          "RMSE": 41.423709869384766,
+          "MAE": 21.204761505126953,
+          "MAPE": 39.35061264038086
+        }
+      ],
+      "trainable_params": 80322
+    },
+    {
+      "checkpoint": "models/checkpoints/transformer/graph_transformer_gat_v1_residual_log1p_all_std_corrAdj_T4_best.pt",
+      "file_name": "graph_transformer_gat_v1_residual_log1p_all_std_corrAdj_T4_best.pt",
+      "architecture_name": "graph_transformer_gat_v1_residual_log1p_all_std_corrAdj",
+      "epoch": 6,
+      "val_loss": 0.19758995114402336,
+      "val_mae": 18.21994400024414,
+      "device_used": "cpu",
+      "input_dim": 33,
+      "used_feature_cols": [
+        "pm2.5",
+        "pm10",
+        "so2",
+        "no2",
+        "co",
+        "o3",
+        "temp",
+        "pres",
+        "dewp",
+        "rain",
+        "wspm",
+        "hour_sin",
+        "hour_cos",
+        "month_sin",
+        "month_cos",
+        "weekday_sin",
+        "weekday_cos",
+        "wd_E",
+        "wd_ENE",
+        "wd_ESE",
+        "wd_N",
+        "wd_NE",
+        "wd_NNE",
+        "wd_NNW",
+        "wd_NW",
+        "wd_S",
+        "wd_SE",
+        "wd_SSE",
+        "wd_SSW",
+        "wd_SW",
+        "wd_W",
+        "wd_WNW",
+        "wd_WSW"
+      ],
+      "config": {
+        "model_type": "graph_transformer",
+        "graph_conv": "gat",
+        "gat_version": "v1",
+        "num_tf_layers": 2,
+        "ffn_dim": 128,
+        "num_gat_layers": 1,
+        "use_direct_decoding": true,
+        "use_wind_adjacency": true,
+        "use_learnable_alpha_gate": true,
+        "use_learnable_sigma": false,
+        "use_node_embeddings": true,
+        "use_temporal_attention_head": false,
+        "use_post_temporal_gat": false,
+        "use_t24_residual": false,
+        "use_horizon_residual_weights": false,
+        "use_learnable_static_adj": false,
+        "use_multitask": false,
+        "use_station_horizon_bias": false,
+        "use_regime_conditioning": false,
+        "use_future_met": false,
+        "met_forecast_mode": "oracle",
+        "wind_direction_method": "circular",
+        "wind_temporal_graphs": 1,
+        "wind_temporal_graph_window": null,
+        "use_pm25_delta": false,
+        "use_holiday_feature": false,
+        "use_persistence_residual": true,
+        "use_per_station_norm": false,
+        "residual_window": 1,
+        "use_trend_residual": false,
+        "use_revin": false,
+        "target_feature_idx": 0,
+        "use_log_transform": true,
+        "loss_type": "evt_hybrid"
+      },
+      "load_info": {
+        "missing_keys": [],
+        "unexpected_keys": [],
+        "partial_load": false
+      },
+      "learned_wind_alpha": 0.4394834041595459,
+      "learned_distance_sigma": null,
+      "is_original_scale": true,
+      "overall": {
+        "RMSE": 37.5728874206543,
+        "MAE": 19.8383731842041,
+        "MAPE": 36.65022277832031,
+        "R2": 0.8348220586776733,
+        "horizon_mae": [
+          10.086709976196289,
+          15.111084938049316,
+          18.84293556213379,
+          22.124597549438477,
+          25.08357048034668,
+          27.78134536743164
+        ]
+      },
+      "horizon_metrics": [
+        {
+          "horizon": 1,
+          "RMSE": 19.62646484375,
+          "MAE": 10.086709976196289,
+          "MAPE": 17.8565731048584
+        },
+        {
+          "horizon": 2,
+          "RMSE": 28.880115509033203,
+          "MAE": 15.111084938049316,
+          "MAPE": 25.61709213256836
+        },
+        {
+          "horizon": 3,
+          "RMSE": 35.1225700378418,
+          "MAE": 18.84293556213379,
+          "MAPE": 32.64669418334961
+        },
+        {
+          "horizon": 4,
+          "RMSE": 40.29757308959961,
+          "MAE": 22.124597549438477,
+          "MAPE": 40.165313720703125
+        },
+        {
+          "horizon": 5,
+          "RMSE": 44.79829788208008,
+          "MAE": 25.08357048034668,
+          "MAPE": 47.78781509399414
+        },
+        {
+          "horizon": 6,
+          "RMSE": 48.853816986083984,
+          "MAE": 27.78134536743164,
+          "MAPE": 55.827857971191406
+        }
+      ],
+      "station_metrics_best3": [
+        {
+          "station": "Huairou",
+          "RMSE": 30.593408584594727,
+          "MAE": 15.623953819274902,
+          "MAPE": 32.37504577636719
+        },
+        {
+          "station": "Dingling",
+          "RMSE": 33.828216552734375,
+          "MAE": 17.03007698059082,
+          "MAPE": 41.23698425292969
+        },
+        {
+          "station": "Changping",
+          "RMSE": 34.1334114074707,
+          "MAE": 17.940052032470703,
+          "MAPE": 39.58946990966797
+        }
+      ],
+      "station_metrics_worst3": [
+        {
+          "station": "Dongsi",
+          "RMSE": 41.0833854675293,
+          "MAE": 22.31276512145996,
+          "MAPE": 36.24911880493164
+        },
+        {
+          "station": "Wanshouxigong",
+          "RMSE": 42.2594108581543,
+          "MAE": 22.12126922607422,
+          "MAPE": 35.18133544921875
+        },
+        {
+          "station": "Gucheng",
+          "RMSE": 41.536922454833984,
+          "MAE": 21.26677703857422,
+          "MAPE": 39.384334564208984
+        }
+      ],
+      "trainable_params": 80322
+    },
+    {
+      "checkpoint": "models/checkpoints/transformer/graph_transformer_gat_v1_residual_log1p_all_std_cosine_s42_T4_best.pt",
+      "file_name": "graph_transformer_gat_v1_residual_log1p_all_std_cosine_s42_T4_best.pt",
+      "architecture_name": "graph_transformer_gat_v1_residual_log1p_all_std_cosine_s42",
+      "epoch": 6,
+      "val_loss": 0.19738395697239675,
+      "val_mae": 18.333919525146484,
+      "device_used": "cpu",
+      "input_dim": 33,
+      "used_feature_cols": [
+        "pm2.5",
+        "pm10",
+        "so2",
+        "no2",
+        "co",
+        "o3",
+        "temp",
+        "pres",
+        "dewp",
+        "rain",
+        "wspm",
+        "hour_sin",
+        "hour_cos",
+        "month_sin",
+        "month_cos",
+        "weekday_sin",
+        "weekday_cos",
+        "wd_E",
+        "wd_ENE",
+        "wd_ESE",
+        "wd_N",
+        "wd_NE",
+        "wd_NNE",
+        "wd_NNW",
+        "wd_NW",
+        "wd_S",
+        "wd_SE",
+        "wd_SSE",
+        "wd_SSW",
+        "wd_SW",
+        "wd_W",
+        "wd_WNW",
+        "wd_WSW"
+      ],
+      "config": {
+        "model_type": "graph_transformer",
+        "graph_conv": "gat",
+        "gat_version": "v1",
+        "num_tf_layers": 2,
+        "ffn_dim": 128,
+        "num_gat_layers": 1,
+        "use_direct_decoding": true,
+        "use_wind_adjacency": true,
+        "use_learnable_alpha_gate": true,
+        "use_learnable_sigma": false,
+        "use_node_embeddings": true,
+        "use_temporal_attention_head": false,
+        "use_post_temporal_gat": false,
+        "use_t24_residual": false,
+        "use_horizon_residual_weights": false,
+        "use_learnable_static_adj": false,
+        "use_multitask": false,
+        "use_station_horizon_bias": false,
+        "use_regime_conditioning": false,
+        "use_future_met": false,
+        "met_forecast_mode": "oracle",
+        "wind_direction_method": "circular",
+        "wind_temporal_graphs": 1,
+        "wind_temporal_graph_window": null,
+        "use_pm25_delta": false,
+        "use_holiday_feature": false,
+        "use_persistence_residual": true,
+        "use_per_station_norm": false,
+        "residual_window": 1,
+        "use_trend_residual": false,
+        "use_revin": false,
+        "target_feature_idx": 0,
+        "use_log_transform": true,
+        "loss_type": "evt_hybrid"
+      },
+      "load_info": {
+        "missing_keys": [],
+        "unexpected_keys": [],
+        "partial_load": false
+      },
+      "learned_wind_alpha": 0.48514604568481445,
+      "learned_distance_sigma": null,
+      "is_original_scale": true,
+      "overall": {
+        "RMSE": 37.92750549316406,
+        "MAE": 20.117008209228516,
+        "MAPE": 36.95439147949219,
+        "R2": 0.8316894173622131,
+        "horizon_mae": [
+          10.199172973632812,
+          15.183941841125488,
+          18.968900680541992,
+          22.360393524169922,
+          25.51011085510254,
+          28.479536056518555
+        ]
+      },
+      "horizon_metrics": [
+        {
+          "horizon": 1,
+          "RMSE": 19.742605209350586,
+          "MAE": 10.199172973632812,
+          "MAPE": 17.985872268676758
+        },
+        {
+          "horizon": 2,
+          "RMSE": 28.843900680541992,
+          "MAE": 15.183941841125488,
+          "MAPE": 25.836688995361328
+        },
+        {
+          "horizon": 3,
+          "RMSE": 35.13628387451172,
+          "MAE": 18.968900680541992,
+          "MAPE": 32.89076614379883
+        },
+        {
+          "horizon": 4,
+          "RMSE": 40.50246810913086,
+          "MAE": 22.360393524169922,
+          "MAPE": 40.43695068359375
+        },
+        {
+          "horizon": 5,
+          "RMSE": 45.32747268676758,
+          "MAE": 25.51011085510254,
+          "MAPE": 48.25426483154297
+        },
+        {
+          "horizon": 6,
+          "RMSE": 49.79603576660156,
+          "MAE": 28.479536056518555,
+          "MAPE": 56.32181167602539
+        }
+      ],
+      "station_metrics_best3": [
+        {
+          "station": "Huairou",
+          "RMSE": 30.873964309692383,
+          "MAE": 15.89603328704834,
+          "MAPE": 32.26185989379883
+        },
+        {
+          "station": "Dingling",
+          "RMSE": 34.63060760498047,
+          "MAE": 17.63471031188965,
+          "MAPE": 41.27003860473633
+        },
+        {
+          "station": "Changping",
+          "RMSE": 34.73780822753906,
+          "MAE": 18.458642959594727,
+          "MAPE": 39.948333740234375
+        }
+      ],
+      "station_metrics_worst3": [
+        {
+          "station": "Dongsi",
+          "RMSE": 41.403743743896484,
+          "MAE": 22.538240432739258,
+          "MAPE": 37.18376922607422
+        },
+        {
+          "station": "Wanshouxigong",
+          "RMSE": 42.60413360595703,
+          "MAE": 22.336944580078125,
+          "MAPE": 35.517303466796875
+        },
+        {
+          "station": "Gucheng",
+          "RMSE": 42.11909866333008,
+          "MAE": 21.621912002563477,
+          "MAPE": 39.59296798706055
+        }
+      ],
+      "trainable_params": 80322
+    },
+    {
+      "checkpoint": "models/checkpoints/transformer/graph_transformer_gat_v1_residual_log1p_all_std_delta_T4_best.pt",
+      "file_name": "graph_transformer_gat_v1_residual_log1p_all_std_delta_T4_best.pt",
+      "architecture_name": "graph_transformer_gat_v1_residual_log1p_all_std_delta",
+      "epoch": 10,
+      "val_loss": 0.1992917351989132,
+      "val_mae": 17.99175453186035,
+      "device_used": "cpu",
+      "input_dim": 34,
+      "used_feature_cols": [
+        "pm2.5",
+        "pm10",
+        "so2",
+        "no2",
+        "co",
+        "o3",
+        "temp",
+        "pres",
+        "dewp",
+        "rain",
+        "wspm",
+        "hour_sin",
+        "hour_cos",
+        "month_sin",
+        "month_cos",
+        "weekday_sin",
+        "weekday_cos",
+        "pm25_delta",
+        "wd_E",
+        "wd_ENE",
+        "wd_ESE",
+        "wd_N",
+        "wd_NE",
+        "wd_NNE",
+        "wd_NNW",
+        "wd_NW",
+        "wd_S",
+        "wd_SE",
+        "wd_SSE",
+        "wd_SSW",
+        "wd_SW",
+        "wd_W",
+        "wd_WNW",
+        "wd_WSW"
+      ],
+      "config": {
+        "model_type": "graph_transformer",
+        "graph_conv": "gat",
+        "gat_version": "v1",
+        "num_tf_layers": 2,
+        "ffn_dim": 128,
+        "num_gat_layers": 1,
+        "use_direct_decoding": true,
+        "use_wind_adjacency": true,
+        "use_learnable_alpha_gate": true,
+        "use_learnable_sigma": false,
+        "use_node_embeddings": true,
+        "use_temporal_attention_head": false,
+        "use_post_temporal_gat": false,
+        "use_t24_residual": false,
+        "use_horizon_residual_weights": false,
+        "use_learnable_static_adj": false,
+        "use_multitask": false,
+        "use_station_horizon_bias": false,
+        "use_regime_conditioning": false,
+        "use_future_met": false,
+        "met_forecast_mode": "oracle",
+        "wind_direction_method": "circular",
+        "wind_temporal_graphs": 1,
+        "wind_temporal_graph_window": null,
+        "use_pm25_delta": true,
+        "use_holiday_feature": false,
+        "use_persistence_residual": true,
+        "use_per_station_norm": false,
+        "residual_window": 1,
+        "use_trend_residual": false,
+        "use_revin": false,
+        "target_feature_idx": 0,
+        "use_log_transform": true,
+        "loss_type": "evt_hybrid"
+      },
+      "load_info": {
+        "missing_keys": [],
+        "unexpected_keys": [],
+        "partial_load": false
+      },
+      "learned_wind_alpha": 0.3289089500904083,
+      "learned_distance_sigma": null,
+      "is_original_scale": true,
+      "overall": {
+        "RMSE": 38.43986892700195,
+        "MAE": 20.120140075683594,
+        "MAPE": 36.98638153076172,
+        "R2": 0.8271112442016602,
+        "horizon_mae": [
+          9.38822078704834,
+          14.75589370727539,
+          18.948654174804688,
+          22.63167381286621,
+          25.963415145874023,
+          29.032987594604492
+        ]
+      },
+      "horizon_metrics": [
+        {
+          "horizon": 1,
+          "RMSE": 18.4643611907959,
+          "MAE": 9.38822078704834,
+          "MAPE": 17.074861526489258
+        },
+        {
+          "horizon": 2,
+          "RMSE": 28.184476852416992,
+          "MAE": 14.75589370727539,
+          "MAPE": 25.257719039916992
+        },
+        {
+          "horizon": 3,
+          "RMSE": 35.309814453125,
+          "MAE": 18.948654174804688,
+          "MAPE": 32.782779693603516
+        },
+        {
+          "horizon": 4,
+          "RMSE": 41.33610153198242,
+          "MAE": 22.63167381286621,
+          "MAPE": 40.70417404174805
+        },
+        {
+          "horizon": 5,
+          "RMSE": 46.510841369628906,
+          "MAE": 25.963415145874023,
+          "MAPE": 48.86094284057617
+        },
+        {
+          "horizon": 6,
+          "RMSE": 51.10508346557617,
+          "MAE": 29.032987594604492,
+          "MAPE": 57.23780822753906
+        }
+      ],
+      "station_metrics_best3": [
+        {
+          "station": "Huairou",
+          "RMSE": 30.8901424407959,
+          "MAE": 15.687713623046875,
+          "MAPE": 33.12907409667969
+        },
+        {
+          "station": "Dingling",
+          "RMSE": 35.035152435302734,
+          "MAE": 17.271324157714844,
+          "MAPE": 40.39180374145508
+        },
+        {
+          "station": "Changping",
+          "RMSE": 34.91414260864258,
+          "MAE": 18.228530883789062,
+          "MAPE": 39.80339813232422
+        }
+      ],
+      "station_metrics_worst3": [
+        {
+          "station": "Dongsi",
+          "RMSE": 42.38007736206055,
+          "MAE": 22.85312843322754,
+          "MAPE": 36.77206802368164
+        },
+        {
+          "station": "Wanshouxigong",
+          "RMSE": 43.56734848022461,
+          "MAE": 22.559358596801758,
+          "MAPE": 35.724308013916016
+        },
+        {
+          "station": "Gucheng",
+          "RMSE": 42.10037612915039,
+          "MAE": 21.76545524597168,
+          "MAPE": 39.95896530151367
+        }
+      ],
+      "trainable_params": 80386
+    },
+    {
+      "checkpoint": "models/checkpoints/transformer/graph_transformer_gat_v1_residual_log1p_all_std_ffn4x_T4_best.pt",
+      "file_name": "graph_transformer_gat_v1_residual_log1p_all_std_ffn4x_T4_best.pt",
+      "architecture_name": "graph_transformer_gat_v1_residual_log1p_all_std_ffn4x",
+      "epoch": 4,
+      "val_loss": 0.20022533024576578,
+      "val_mae": 18.04662322998047,
+      "device_used": "cpu",
+      "input_dim": 33,
+      "used_feature_cols": [
+        "pm2.5",
+        "pm10",
+        "so2",
+        "no2",
+        "co",
+        "o3",
+        "temp",
+        "pres",
+        "dewp",
+        "rain",
+        "wspm",
+        "hour_sin",
+        "hour_cos",
+        "month_sin",
+        "month_cos",
+        "weekday_sin",
+        "weekday_cos",
+        "wd_E",
+        "wd_ENE",
+        "wd_ESE",
+        "wd_N",
+        "wd_NE",
+        "wd_NNE",
+        "wd_NNW",
+        "wd_NW",
+        "wd_S",
+        "wd_SE",
+        "wd_SSE",
+        "wd_SSW",
+        "wd_SW",
+        "wd_W",
+        "wd_WNW",
+        "wd_WSW"
+      ],
+      "config": {
+        "model_type": "graph_transformer",
+        "graph_conv": "gat",
+        "gat_version": "v1",
+        "num_tf_layers": 2,
+        "ffn_dim": 256,
+        "num_gat_layers": 1,
+        "use_direct_decoding": true,
+        "use_wind_adjacency": true,
+        "use_learnable_alpha_gate": true,
+        "use_learnable_sigma": false,
+        "use_node_embeddings": true,
+        "use_temporal_attention_head": false,
+        "use_post_temporal_gat": false,
+        "use_t24_residual": false,
+        "use_horizon_residual_weights": false,
+        "use_learnable_static_adj": false,
+        "use_multitask": false,
+        "use_station_horizon_bias": false,
+        "use_regime_conditioning": false,
+        "use_future_met": false,
+        "met_forecast_mode": "oracle",
+        "wind_direction_method": "circular",
+        "wind_temporal_graphs": 1,
+        "wind_temporal_graph_window": null,
+        "use_pm25_delta": false,
+        "use_holiday_feature": false,
+        "use_persistence_residual": true,
+        "use_per_station_norm": false,
+        "residual_window": 1,
+        "use_trend_residual": false,
+        "use_revin": false,
+        "target_feature_idx": 0,
+        "use_log_transform": true,
+        "loss_type": "evt_hybrid"
+      },
+      "load_info": {
+        "missing_keys": [],
+        "unexpected_keys": [],
+        "partial_load": false
+      },
+      "learned_wind_alpha": 0.47722485661506653,
+      "learned_distance_sigma": null,
+      "is_original_scale": true,
+      "overall": {
+        "RMSE": 38.104248046875,
+        "MAE": 20.05254554748535,
+        "MAPE": 35.91484069824219,
+        "R2": 0.8301171064376831,
+        "horizon_mae": [
+          9.990549087524414,
+          15.29086971282959,
+          19.142139434814453,
+          22.398523330688477,
+          25.35942268371582,
+          28.13376808166504
+        ]
+      },
+      "horizon_metrics": [
+        {
+          "horizon": 1,
+          "RMSE": 19.519100189208984,
+          "MAE": 9.990549087524414,
+          "MAPE": 17.760730743408203
+        },
+        {
+          "horizon": 2,
+          "RMSE": 29.22191047668457,
+          "MAE": 15.29086971282959,
+          "MAPE": 25.31654167175293
+        },
+        {
+          "horizon": 3,
+          "RMSE": 35.71109390258789,
+          "MAE": 19.142139434814453,
+          "MAPE": 32.032047271728516
+        },
+        {
+          "horizon": 4,
+          "RMSE": 40.94232177734375,
+          "MAE": 22.398523330688477,
+          "MAPE": 39.2439079284668
+        },
+        {
+          "horizon": 5,
+          "RMSE": 45.46528244018555,
+          "MAE": 25.35942268371582,
+          "MAPE": 46.70527267456055
+        },
+        {
+          "horizon": 6,
+          "RMSE": 49.57861328125,
+          "MAE": 28.13376808166504,
+          "MAPE": 54.43053436279297
+        }
+      ],
+      "station_metrics_best3": [
+        {
+          "station": "Huairou",
+          "RMSE": 31.170358657836914,
+          "MAE": 15.877106666564941,
+          "MAPE": 30.96420669555664
+        },
+        {
+          "station": "Dingling",
+          "RMSE": 35.516456604003906,
+          "MAE": 17.909908294677734,
+          "MAPE": 39.97132110595703
+        },
+        {
+          "station": "Changping",
+          "RMSE": 34.91004180908203,
+          "MAE": 18.36298370361328,
+          "MAPE": 38.85646057128906
+        }
+      ],
+      "station_metrics_worst3": [
+        {
+          "station": "Dongsi",
+          "RMSE": 41.815799713134766,
+          "MAE": 22.51300811767578,
+          "MAPE": 36.155582427978516
+        },
+        {
+          "station": "Wanshouxigong",
+          "RMSE": 42.67197036743164,
+          "MAE": 22.208919525146484,
+          "MAPE": 34.81087875366211
+        },
+        {
+          "station": "Gucheng",
+          "RMSE": 41.97661209106445,
+          "MAE": 21.563716888427734,
+          "MAPE": 38.57528305053711
+        }
+      ],
+      "trainable_params": 113346
+    },
+    {
+      "checkpoint": "models/checkpoints/transformer/graph_transformer_gat_v1_residual_log1p_all_std_holiday_T4_best.pt",
+      "file_name": "graph_transformer_gat_v1_residual_log1p_all_std_holiday_T4_best.pt",
+      "architecture_name": "graph_transformer_gat_v1_residual_log1p_all_std_holiday",
+      "epoch": 7,
+      "val_loss": 0.2014899496892185,
+      "val_mae": 18.39972686767578,
+      "device_used": "cpu",
+      "input_dim": 34,
+      "used_feature_cols": [
+        "pm2.5",
+        "pm10",
+        "so2",
+        "no2",
+        "co",
+        "o3",
+        "temp",
+        "pres",
+        "dewp",
+        "rain",
+        "wspm",
+        "hour_sin",
+        "hour_cos",
+        "month_sin",
+        "month_cos",
+        "weekday_sin",
+        "weekday_cos",
+        "holiday_flag",
+        "wd_E",
+        "wd_ENE",
+        "wd_ESE",
+        "wd_N",
+        "wd_NE",
+        "wd_NNE",
+        "wd_NNW",
+        "wd_NW",
+        "wd_S",
+        "wd_SE",
+        "wd_SSE",
+        "wd_SSW",
+        "wd_SW",
+        "wd_W",
+        "wd_WNW",
+        "wd_WSW"
+      ],
+      "config": {
+        "model_type": "graph_transformer",
+        "graph_conv": "gat",
+        "gat_version": "v1",
+        "num_tf_layers": 2,
+        "ffn_dim": 128,
+        "num_gat_layers": 1,
+        "use_direct_decoding": true,
+        "use_wind_adjacency": true,
+        "use_learnable_alpha_gate": true,
+        "use_learnable_sigma": false,
+        "use_node_embeddings": true,
+        "use_temporal_attention_head": false,
+        "use_post_temporal_gat": false,
+        "use_t24_residual": false,
+        "use_horizon_residual_weights": false,
+        "use_learnable_static_adj": false,
+        "use_multitask": false,
+        "use_station_horizon_bias": false,
+        "use_regime_conditioning": false,
+        "use_future_met": false,
+        "met_forecast_mode": "oracle",
+        "wind_direction_method": "circular",
+        "wind_temporal_graphs": 1,
+        "wind_temporal_graph_window": null,
+        "use_pm25_delta": false,
+        "use_holiday_feature": true,
+        "use_persistence_residual": true,
+        "use_per_station_norm": false,
+        "residual_window": 1,
+        "use_trend_residual": false,
+        "use_revin": false,
+        "target_feature_idx": 0,
+        "use_log_transform": true,
+        "loss_type": "evt_hybrid"
+      },
+      "load_info": {
+        "missing_keys": [],
+        "unexpected_keys": [],
+        "partial_load": false
+      },
+      "learned_wind_alpha": 0.4056284725666046,
+      "learned_distance_sigma": null,
+      "is_original_scale": true,
+      "overall": {
+        "RMSE": 39.13670349121094,
+        "MAE": 20.37382698059082,
+        "MAPE": 35.54374694824219,
+        "R2": 0.8207862377166748,
+        "horizon_mae": [
+          9.9956636428833,
+          15.309297561645508,
+          19.280550003051758,
+          22.745180130004883,
+          25.98879051208496,
+          28.923479080200195
+        ]
+      },
+      "horizon_metrics": [
+        {
+          "horizon": 1,
+          "RMSE": 19.73935317993164,
+          "MAE": 9.9956636428833,
+          "MAPE": 17.501726150512695
+        },
+        {
+          "horizon": 2,
+          "RMSE": 29.377958297729492,
+          "MAE": 15.309297561645508,
+          "MAPE": 24.988046646118164
+        },
+        {
+          "horizon": 3,
+          "RMSE": 36.195777893066406,
+          "MAE": 19.280550003051758,
+          "MAPE": 31.60015106201172
+        },
+        {
+          "horizon": 4,
+          "RMSE": 41.900543212890625,
+          "MAE": 22.745180130004883,
+          "MAPE": 38.79696273803711
+        },
+        {
+          "horizon": 5,
+          "RMSE": 47.09181213378906,
+          "MAE": 25.98879051208496,
+          "MAPE": 46.38882827758789
+        },
+        {
+          "horizon": 6,
+          "RMSE": 51.516544342041016,
+          "MAE": 28.923479080200195,
+          "MAPE": 53.98677444458008
+        }
+      ],
+      "station_metrics_best3": [
+        {
+          "station": "Huairou",
+          "RMSE": 32.049285888671875,
+          "MAE": 16.10279083251953,
+          "MAPE": 32.23063659667969
+        },
+        {
+          "station": "Dingling",
+          "RMSE": 35.790557861328125,
+          "MAE": 17.586915969848633,
+          "MAPE": 39.94103240966797
+        },
+        {
+          "station": "Changping",
+          "RMSE": 35.160797119140625,
+          "MAE": 18.229461669921875,
+          "MAPE": 38.405426025390625
+        }
+      ],
+      "station_metrics_worst3": [
+        {
+          "station": "Dongsi",
+          "RMSE": 43.17054748535156,
+          "MAE": 23.20559310913086,
+          "MAPE": 35.246334075927734
+        },
+        {
+          "station": "Wanshouxigong",
+          "RMSE": 44.307369232177734,
+          "MAE": 23.01580810546875,
+          "MAPE": 34.52349090576172
+        },
+        {
+          "station": "Gucheng",
+          "RMSE": 42.94392776489258,
+          "MAE": 21.727359771728516,
+          "MAPE": 37.69287872314453
+        }
+      ],
+      "trainable_params": 80386
+    },
+    {
+      "checkpoint": "models/checkpoints/transformer/graph_transformer_gat_v1_residual_log1p_all_std_learnAdj_T4_best.pt",
+      "file_name": "graph_transformer_gat_v1_residual_log1p_all_std_learnAdj_T4_best.pt",
+      "architecture_name": "graph_transformer_gat_v1_residual_log1p_all_std_learnAdj",
+      "epoch": 6,
+      "val_loss": 0.19758536303133675,
+      "val_mae": 18.221763610839844,
+      "device_used": "cpu",
+      "input_dim": 33,
+      "used_feature_cols": [
+        "pm2.5",
+        "pm10",
+        "so2",
+        "no2",
+        "co",
+        "o3",
+        "temp",
+        "pres",
+        "dewp",
+        "rain",
+        "wspm",
+        "hour_sin",
+        "hour_cos",
+        "month_sin",
+        "month_cos",
+        "weekday_sin",
+        "weekday_cos",
+        "wd_E",
+        "wd_ENE",
+        "wd_ESE",
+        "wd_N",
+        "wd_NE",
+        "wd_NNE",
+        "wd_NNW",
+        "wd_NW",
+        "wd_S",
+        "wd_SE",
+        "wd_SSE",
+        "wd_SSW",
+        "wd_SW",
+        "wd_W",
+        "wd_WNW",
+        "wd_WSW"
+      ],
+      "config": {
+        "model_type": "graph_transformer",
+        "graph_conv": "gat",
+        "gat_version": "v1",
+        "num_tf_layers": 2,
+        "ffn_dim": 128,
+        "num_gat_layers": 1,
+        "use_direct_decoding": true,
+        "use_wind_adjacency": true,
+        "use_learnable_alpha_gate": true,
+        "use_learnable_sigma": false,
+        "use_node_embeddings": true,
+        "use_temporal_attention_head": false,
+        "use_post_temporal_gat": false,
+        "use_t24_residual": false,
+        "use_horizon_residual_weights": false,
+        "use_learnable_static_adj": true,
+        "use_multitask": false,
+        "use_station_horizon_bias": false,
+        "use_regime_conditioning": false,
+        "use_future_met": false,
+        "met_forecast_mode": "oracle",
+        "wind_direction_method": "circular",
+        "wind_temporal_graphs": 1,
+        "wind_temporal_graph_window": null,
+        "use_pm25_delta": false,
+        "use_holiday_feature": false,
+        "use_persistence_residual": true,
+        "use_per_station_norm": false,
+        "residual_window": 1,
+        "use_trend_residual": false,
+        "use_revin": false,
+        "target_feature_idx": 0,
+        "use_log_transform": true,
+        "loss_type": "evt_hybrid"
+      },
+      "load_info": {
+        "missing_keys": [],
+        "unexpected_keys": [],
+        "partial_load": false
+      },
+      "learned_wind_alpha": 0.42480409145355225,
+      "learned_distance_sigma": null,
+      "is_original_scale": true,
+      "overall": {
+        "RMSE": 37.58302307128906,
+        "MAE": 19.84379768371582,
+        "MAPE": 36.64704132080078,
+        "R2": 0.8347330093383789,
+        "horizon_mae": [
+          10.089479446411133,
+          15.11534595489502,
+          18.848072052001953,
+          22.130722045898438,
+          25.09086036682129,
+          27.788307189941406
+        ]
+      },
+      "horizon_metrics": [
+        {
+          "horizon": 1,
+          "RMSE": 19.627790451049805,
+          "MAE": 10.089479446411133,
+          "MAPE": 17.85660171508789
+        },
+        {
+          "horizon": 2,
+          "RMSE": 28.883485794067383,
+          "MAE": 15.11534595489502,
+          "MAPE": 25.613265991210938
+        },
+        {
+          "horizon": 3,
+          "RMSE": 35.128963470458984,
+          "MAE": 18.848072052001953,
+          "MAPE": 32.64064025878906
+        },
+        {
+          "horizon": 4,
+          "RMSE": 40.30876541137695,
+          "MAE": 22.130722045898438,
+          "MAPE": 40.15949249267578
+        },
+        {
+          "horizon": 5,
+          "RMSE": 44.81352233886719,
+          "MAE": 25.09086036682129,
+          "MAPE": 47.7835807800293
+        },
+        {
+          "horizon": 6,
+          "RMSE": 48.87027359008789,
+          "MAE": 27.788307189941406,
+          "MAPE": 55.82864761352539
+        }
+      ],
+      "station_metrics_best3": [
+        {
+          "station": "Huairou",
+          "RMSE": 30.599138259887695,
+          "MAE": 15.626198768615723,
+          "MAPE": 32.370399475097656
+        },
+        {
+          "station": "Dingling",
+          "RMSE": 33.83121109008789,
+          "MAE": 17.033845901489258,
+          "MAPE": 41.24278259277344
+        },
+        {
+          "station": "Changping",
+          "RMSE": 34.139312744140625,
+          "MAE": 17.94361114501953,
+          "MAPE": 39.586753845214844
+        }
+      ],
+      "station_metrics_worst3": [
+        {
+          "station": "Dongsi",
+          "RMSE": 41.0932731628418,
+          "MAE": 22.31998062133789,
+          "MAPE": 36.250831604003906
+        },
+        {
+          "station": "Wanshouxigong",
+          "RMSE": 42.271846771240234,
+          "MAE": 22.127500534057617,
+          "MAPE": 35.17756652832031
+        },
+        {
+          "station": "Gucheng",
+          "RMSE": 41.55699157714844,
+          "MAE": 21.279510498046875,
+          "MAPE": 39.38317108154297
+        }
+      ],
+      "trainable_params": 80466
+    },
+    {
+      "checkpoint": "models/checkpoints/transformer/graph_transformer_gat_v1_residual_log1p_all_std_lrmae_T4_best.pt",
+      "file_name": "graph_transformer_gat_v1_residual_log1p_all_std_lrmae_T4_best.pt",
+      "architecture_name": "graph_transformer_gat_v1_residual_log1p_all_std_lrmae",
+      "epoch": 6,
+      "val_loss": 0.19762629497457634,
+      "val_mae": 18.221210479736328,
+      "device_used": "cpu",
+      "input_dim": 33,
+      "used_feature_cols": [
+        "pm2.5",
+        "pm10",
+        "so2",
+        "no2",
+        "co",
+        "o3",
+        "temp",
+        "pres",
+        "dewp",
+        "rain",
+        "wspm",
+        "hour_sin",
+        "hour_cos",
+        "month_sin",
+        "month_cos",
+        "weekday_sin",
+        "weekday_cos",
+        "wd_E",
+        "wd_ENE",
+        "wd_ESE",
+        "wd_N",
+        "wd_NE",
+        "wd_NNE",
+        "wd_NNW",
+        "wd_NW",
+        "wd_S",
+        "wd_SE",
+        "wd_SSE",
+        "wd_SSW",
+        "wd_SW",
+        "wd_W",
+        "wd_WNW",
+        "wd_WSW"
+      ],
+      "config": {
+        "model_type": "graph_transformer",
+        "graph_conv": "gat",
+        "gat_version": "v1",
+        "num_tf_layers": 2,
+        "ffn_dim": 128,
+        "num_gat_layers": 1,
+        "use_direct_decoding": true,
+        "use_wind_adjacency": true,
+        "use_learnable_alpha_gate": true,
+        "use_learnable_sigma": false,
+        "use_node_embeddings": true,
+        "use_temporal_attention_head": false,
+        "use_post_temporal_gat": false,
+        "use_t24_residual": false,
+        "use_horizon_residual_weights": false,
+        "use_learnable_static_adj": false,
+        "use_multitask": false,
+        "use_station_horizon_bias": false,
+        "use_regime_conditioning": false,
+        "use_future_met": false,
+        "met_forecast_mode": "oracle",
+        "wind_direction_method": "circular",
+        "wind_temporal_graphs": 1,
+        "wind_temporal_graph_window": null,
+        "use_pm25_delta": false,
+        "use_holiday_feature": false,
+        "use_persistence_residual": true,
+        "use_per_station_norm": false,
+        "residual_window": 1,
+        "use_trend_residual": false,
+        "use_revin": false,
+        "target_feature_idx": 0,
+        "use_log_transform": true,
+        "loss_type": "evt_hybrid"
+      },
+      "load_info": {
+        "missing_keys": [],
+        "unexpected_keys": [],
+        "partial_load": false
+      },
+      "learned_wind_alpha": 0.4355076849460602,
+      "learned_distance_sigma": null,
+      "is_original_scale": true,
+      "overall": {
+        "RMSE": 37.50847625732422,
+        "MAE": 19.814979553222656,
+        "MAPE": 36.61723327636719,
+        "R2": 0.8353879451751709,
+        "horizon_mae": [
+          10.078868865966797,
+          15.092658042907715,
+          18.81820297241211,
+          22.09673309326172,
+          25.053104400634766,
+          27.75030517578125
+        ]
+      },
+      "horizon_metrics": [
+        {
+          "horizon": 1,
+          "RMSE": 19.614761352539062,
+          "MAE": 10.078868865966797,
+          "MAPE": 17.847261428833008
+        },
+        {
+          "horizon": 2,
+          "RMSE": 28.84421157836914,
+          "MAE": 15.092658042907715,
+          "MAPE": 25.60055160522461
+        },
+        {
+          "horizon": 3,
+          "RMSE": 35.06520462036133,
+          "MAE": 18.81820297241211,
+          "MAPE": 32.626285552978516
+        },
+        {
+          "horizon": 4,
+          "RMSE": 40.22384262084961,
+          "MAE": 22.09673309326172,
+          "MAPE": 40.134220123291016
+        },
+        {
+          "horizon": 5,
+          "RMSE": 44.713783264160156,
+          "MAE": 25.053104400634766,
+          "MAPE": 47.74457931518555
+        },
+        {
+          "horizon": 6,
+          "RMSE": 48.762062072753906,
+          "MAE": 27.75030517578125,
+          "MAPE": 55.750511169433594
+        }
+      ],
+      "station_metrics_best3": [
+        {
+          "station": "Huairou",
+          "RMSE": 30.55144691467285,
+          "MAE": 15.608532905578613,
+          "MAPE": 32.347904205322266
+        },
+        {
+          "station": "Dingling",
+          "RMSE": 33.82796096801758,
+          "MAE": 17.042709350585938,
+          "MAPE": 41.22796630859375
+        },
+        {
+          "station": "Changping",
+          "RMSE": 34.11797332763672,
+          "MAE": 17.936254501342773,
+          "MAPE": 39.562625885009766
+        }
+      ],
+      "station_metrics_worst3": [
+        {
+          "station": "Dongsi",
+          "RMSE": 41.00859832763672,
+          "MAE": 22.283418655395508,
+          "MAPE": 36.216068267822266
+        },
+        {
+          "station": "Wanshouxigong",
+          "RMSE": 42.18120574951172,
+          "MAE": 22.09694480895996,
+          "MAPE": 35.15388488769531
+        },
+        {
+          "station": "Gucheng",
+          "RMSE": 41.423709869384766,
+          "MAE": 21.204761505126953,
+          "MAPE": 39.35061264038086
+        }
+      ],
+      "trainable_params": 80322
+    },
+    {
+      "checkpoint": "models/checkpoints/transformer/graph_transformer_gat_v1_residual_log1p_all_std_multitask_T4_best.pt",
+      "file_name": "graph_transformer_gat_v1_residual_log1p_all_std_multitask_T4_best.pt",
+      "architecture_name": "graph_transformer_gat_v1_residual_log1p_all_std_multitask",
+      "epoch": 4,
+      "val_loss": 0.203579607425314,
+      "val_mae": 18.387123107910156,
+      "device_used": "cpu",
+      "input_dim": 33,
+      "used_feature_cols": [
+        "pm2.5",
+        "pm10",
+        "so2",
+        "no2",
+        "co",
+        "o3",
+        "temp",
+        "pres",
+        "dewp",
+        "rain",
+        "wspm",
+        "hour_sin",
+        "hour_cos",
+        "month_sin",
+        "month_cos",
+        "weekday_sin",
+        "weekday_cos",
+        "wd_E",
+        "wd_ENE",
+        "wd_ESE",
+        "wd_N",
+        "wd_NE",
+        "wd_NNE",
+        "wd_NNW",
+        "wd_NW",
+        "wd_S",
+        "wd_SE",
+        "wd_SSE",
+        "wd_SSW",
+        "wd_SW",
+        "wd_W",
+        "wd_WNW",
+        "wd_WSW"
+      ],
+      "config": {
+        "model_type": "graph_transformer",
+        "graph_conv": "gat",
+        "gat_version": "v1",
+        "num_tf_layers": 2,
+        "ffn_dim": 128,
+        "num_gat_layers": 1,
+        "use_direct_decoding": true,
+        "use_wind_adjacency": true,
+        "use_learnable_alpha_gate": true,
+        "use_learnable_sigma": false,
+        "use_node_embeddings": true,
+        "use_temporal_attention_head": false,
+        "use_post_temporal_gat": false,
+        "use_t24_residual": false,
+        "use_horizon_residual_weights": false,
+        "use_learnable_static_adj": false,
+        "use_multitask": true,
+        "use_station_horizon_bias": false,
+        "use_regime_conditioning": false,
+        "use_future_met": false,
+        "met_forecast_mode": "oracle",
+        "wind_direction_method": "circular",
+        "wind_temporal_graphs": 1,
+        "wind_temporal_graph_window": null,
+        "use_pm25_delta": false,
+        "use_holiday_feature": false,
+        "use_persistence_residual": true,
+        "use_per_station_norm": false,
+        "residual_window": 1,
+        "use_trend_residual": false,
+        "use_revin": false,
+        "target_feature_idx": 0,
+        "use_log_transform": true,
+        "loss_type": "evt_hybrid"
+      },
+      "load_info": {
+        "missing_keys": [],
+        "unexpected_keys": [],
+        "partial_load": false
+      },
+      "learned_wind_alpha": 0.49588024616241455,
+      "learned_distance_sigma": null,
+      "is_original_scale": true,
+      "overall": {
+        "RMSE": 38.160099029541016,
+        "MAE": 20.202571868896484,
+        "MAPE": 37.19803237915039,
+        "R2": 0.8296187520027161,
+        "horizon_mae": [
+          9.8868989944458,
+          15.163841247558594,
+          19.159955978393555,
+          22.64173126220703,
+          25.744827270507812,
+          28.618181228637695
+        ]
+      },
+      "horizon_metrics": [
+        {
+          "horizon": 1,
+          "RMSE": 19.434776306152344,
+          "MAE": 9.8868989944458,
+          "MAPE": 18.047229766845703
+        },
+        {
+          "horizon": 2,
+          "RMSE": 28.818586349487305,
+          "MAE": 15.163841247558594,
+          "MAPE": 25.989660263061523
+        },
+        {
+          "horizon": 3,
+          "RMSE": 35.325538635253906,
+          "MAE": 19.159955978393555,
+          "MAPE": 33.1072998046875
+        },
+        {
+          "horizon": 4,
+          "RMSE": 40.8713264465332,
+          "MAE": 22.64173126220703,
+          "MAPE": 40.73236083984375
+        },
+        {
+          "horizon": 5,
+          "RMSE": 45.74494552612305,
+          "MAE": 25.744827270507812,
+          "MAPE": 48.73504638671875
+        },
+        {
+          "horizon": 6,
+          "RMSE": 50.17947006225586,
+          "MAE": 28.618181228637695,
+          "MAPE": 56.57659912109375
+        }
+      ],
+      "station_metrics_best3": [
+        {
+          "station": "Huairou",
+          "RMSE": 30.650854110717773,
+          "MAE": 15.797904014587402,
+          "MAPE": 32.6402702331543
+        },
+        {
+          "station": "Dingling",
+          "RMSE": 35.54718017578125,
+          "MAE": 17.604251861572266,
+          "MAPE": 40.85918045043945
+        },
+        {
+          "station": "Changping",
+          "RMSE": 34.77501678466797,
+          "MAE": 18.289400100708008,
+          "MAPE": 39.72608184814453
+        }
+      ],
+      "station_metrics_worst3": [
+        {
+          "station": "Wanshouxigong",
+          "RMSE": 42.984230041503906,
+          "MAE": 22.65654945373535,
+          "MAPE": 36.51952362060547
+        },
+        {
+          "station": "Dongsi",
+          "RMSE": 41.385799407958984,
+          "MAE": 22.561893463134766,
+          "MAPE": 37.06084060668945
+        },
+        {
+          "station": "Gucheng",
+          "RMSE": 42.000911712646484,
+          "MAE": 21.747007369995117,
+          "MAPE": 40.15765380859375
+        }
+      ],
+      "trainable_params": 86471
+    },
+    {
+      "checkpoint": "models/checkpoints/transformer/graph_transformer_gat_v1_residual_log1p_all_std_noise_T4_best.pt",
+      "file_name": "graph_transformer_gat_v1_residual_log1p_all_std_noise_T4_best.pt",
+      "architecture_name": "graph_transformer_gat_v1_residual_log1p_all_std_noise",
+      "epoch": 6,
+      "val_loss": 0.19804677210296645,
+      "val_mae": 18.22548484802246,
+      "device_used": "cpu",
+      "input_dim": 33,
+      "used_feature_cols": [
+        "pm2.5",
+        "pm10",
+        "so2",
+        "no2",
+        "co",
+        "o3",
+        "temp",
+        "pres",
+        "dewp",
+        "rain",
+        "wspm",
+        "hour_sin",
+        "hour_cos",
+        "month_sin",
+        "month_cos",
+        "weekday_sin",
+        "weekday_cos",
+        "wd_E",
+        "wd_ENE",
+        "wd_ESE",
+        "wd_N",
+        "wd_NE",
+        "wd_NNE",
+        "wd_NNW",
+        "wd_NW",
+        "wd_S",
+        "wd_SE",
+        "wd_SSE",
+        "wd_SSW",
+        "wd_SW",
+        "wd_W",
+        "wd_WNW",
+        "wd_WSW"
+      ],
+      "config": {
+        "model_type": "graph_transformer",
+        "graph_conv": "gat",
+        "gat_version": "v1",
+        "num_tf_layers": 2,
+        "ffn_dim": 128,
+        "num_gat_layers": 1,
+        "use_direct_decoding": true,
+        "use_wind_adjacency": true,
+        "use_learnable_alpha_gate": true,
+        "use_learnable_sigma": false,
+        "use_node_embeddings": true,
+        "use_temporal_attention_head": false,
+        "use_post_temporal_gat": false,
+        "use_t24_residual": false,
+        "use_horizon_residual_weights": false,
+        "use_learnable_static_adj": false,
+        "use_multitask": false,
+        "use_station_horizon_bias": false,
+        "use_regime_conditioning": false,
+        "use_future_met": false,
+        "met_forecast_mode": "oracle",
+        "wind_direction_method": "circular",
+        "wind_temporal_graphs": 1,
+        "wind_temporal_graph_window": null,
+        "use_pm25_delta": false,
+        "use_holiday_feature": false,
+        "use_persistence_residual": true,
+        "use_per_station_norm": false,
+        "residual_window": 1,
+        "use_trend_residual": false,
+        "use_revin": false,
+        "target_feature_idx": 0,
+        "use_log_transform": true,
+        "loss_type": "evt_hybrid"
+      },
+      "load_info": {
+        "missing_keys": [],
+        "unexpected_keys": [],
+        "partial_load": false
+      },
+      "learned_wind_alpha": 0.43325522541999817,
+      "learned_distance_sigma": null,
+      "is_original_scale": true,
+      "overall": {
+        "RMSE": 37.68895721435547,
+        "MAE": 19.928733825683594,
+        "MAPE": 36.46183395385742,
+        "R2": 0.8337999582290649,
+        "horizon_mae": [
+          10.256068229675293,
+          15.159896850585938,
+          18.844236373901367,
+          22.130924224853516,
+          25.188186645507812,
+          27.993087768554688
+        ]
+      },
+      "horizon_metrics": [
+        {
+          "horizon": 1,
+          "RMSE": 19.78084945678711,
+          "MAE": 10.256068229675293,
+          "MAPE": 17.934017181396484
+        },
+        {
+          "horizon": 2,
+          "RMSE": 28.901350021362305,
+          "MAE": 15.159896850585938,
+          "MAPE": 25.535526275634766
+        },
+        {
+          "horizon": 3,
+          "RMSE": 35.0994758605957,
+          "MAE": 18.844236373901367,
+          "MAPE": 32.470096588134766
+        },
+        {
+          "horizon": 4,
+          "RMSE": 40.29814910888672,
+          "MAE": 22.130924224853516,
+          "MAPE": 39.85581588745117
+        },
+        {
+          "horizon": 5,
+          "RMSE": 44.963478088378906,
+          "MAE": 25.188186645507812,
+          "MAPE": 47.49704360961914
+        },
+        {
+          "horizon": 6,
+          "RMSE": 49.178714752197266,
+          "MAE": 27.993087768554688,
+          "MAPE": 55.47850036621094
+        }
+      ],
+      "station_metrics_best3": [
+        {
+          "station": "Huairou",
+          "RMSE": 30.4639835357666,
+          "MAE": 15.559725761413574,
+          "MAPE": 31.879562377929688
+        },
+        {
+          "station": "Dingling",
+          "RMSE": 33.973751068115234,
+          "MAE": 17.1972713470459,
+          "MAPE": 40.93938064575195
+        },
+        {
+          "station": "Changping",
+          "RMSE": 34.13472366333008,
+          "MAE": 17.96393585205078,
+          "MAPE": 39.54945373535156
+        }
+      ],
+      "station_metrics_worst3": [
+        {
+          "station": "Dongsi",
+          "RMSE": 41.30677795410156,
+          "MAE": 22.497041702270508,
+          "MAPE": 36.17362594604492
+        },
+        {
+          "station": "Wanshouxigong",
+          "RMSE": 42.65826416015625,
+          "MAE": 22.339223861694336,
+          "MAPE": 34.895904541015625
+        },
+        {
+          "station": "Nongzhanguan",
+          "RMSE": 39.32361602783203,
+          "MAE": 21.340412139892578,
+          "MAPE": 36.098968505859375
+        }
+      ],
+      "trainable_params": 80322
+    },
+    {
+      "checkpoint": "models/checkpoints/transformer/graph_transformer_gat_v1_residual_log1p_all_std_perstation_T4_best.pt",
+      "file_name": "graph_transformer_gat_v1_residual_log1p_all_std_perstation_T4_best.pt",
+      "architecture_name": "graph_transformer_gat_v1_residual_log1p_all_std_perstation",
+      "epoch": 6,
+      "val_loss": 0.19943398928100411,
+      "val_mae": 18.204492568969727,
+      "device_used": "cpu",
+      "input_dim": 33,
+      "used_feature_cols": [
+        "pm2.5",
+        "pm10",
+        "so2",
+        "no2",
+        "co",
+        "o3",
+        "temp",
+        "pres",
+        "dewp",
+        "rain",
+        "wspm",
+        "hour_sin",
+        "hour_cos",
+        "month_sin",
+        "month_cos",
+        "weekday_sin",
+        "weekday_cos",
+        "wd_E",
+        "wd_ENE",
+        "wd_ESE",
+        "wd_N",
+        "wd_NE",
+        "wd_NNE",
+        "wd_NNW",
+        "wd_NW",
+        "wd_S",
+        "wd_SE",
+        "wd_SSE",
+        "wd_SSW",
+        "wd_SW",
+        "wd_W",
+        "wd_WNW",
+        "wd_WSW"
+      ],
+      "config": {
+        "model_type": "graph_transformer",
+        "graph_conv": "gat",
+        "gat_version": "v1",
+        "num_tf_layers": 2,
+        "ffn_dim": 128,
+        "num_gat_layers": 1,
+        "use_direct_decoding": true,
+        "use_wind_adjacency": true,
+        "use_learnable_alpha_gate": true,
+        "use_learnable_sigma": false,
+        "use_node_embeddings": true,
+        "use_temporal_attention_head": false,
+        "use_post_temporal_gat": false,
+        "use_t24_residual": false,
+        "use_horizon_residual_weights": false,
+        "use_learnable_static_adj": false,
+        "use_multitask": false,
+        "use_station_horizon_bias": false,
+        "use_regime_conditioning": false,
+        "use_future_met": false,
+        "met_forecast_mode": "oracle",
+        "wind_direction_method": "circular",
+        "wind_temporal_graphs": 1,
+        "wind_temporal_graph_window": null,
+        "use_pm25_delta": false,
+        "use_holiday_feature": false,
+        "use_persistence_residual": true,
+        "use_per_station_norm": true,
+        "residual_window": 1,
+        "use_trend_residual": false,
+        "use_revin": false,
+        "target_feature_idx": 0,
+        "use_log_transform": true,
+        "loss_type": "evt_hybrid"
+      },
+      "load_info": {
+        "missing_keys": [],
+        "unexpected_keys": [],
+        "partial_load": false
+      },
+      "learned_wind_alpha": 0.4404250979423523,
+      "learned_distance_sigma": null,
+      "is_original_scale": true,
+      "overall": {
+        "RMSE": 37.56807327270508,
+        "MAE": 19.84691047668457,
+        "MAPE": 36.67674255371094,
+        "R2": 0.8348643779754639,
+        "horizon_mae": [
+          10.083091735839844,
+          15.11329460144043,
+          18.85182762145996,
+          22.137798309326172,
+          25.09752655029297,
+          27.797916412353516
+        ]
+      },
+      "horizon_metrics": [
+        {
+          "horizon": 1,
+          "RMSE": 19.629056930541992,
+          "MAE": 10.083091735839844,
+          "MAPE": 17.88128662109375
+        },
+        {
+          "horizon": 2,
+          "RMSE": 28.89237403869629,
+          "MAE": 15.11329460144043,
+          "MAPE": 25.672468185424805
+        },
+        {
+          "horizon": 3,
+          "RMSE": 35.125999450683594,
+          "MAE": 18.85182762145996,
+          "MAPE": 32.70935821533203
+        },
+        {
+          "horizon": 4,
+          "RMSE": 40.293739318847656,
+          "MAE": 22.137798309326172,
+          "MAPE": 40.20362091064453
+        },
+        {
+          "horizon": 5,
+          "RMSE": 44.78575897216797,
+          "MAE": 25.09752655029297,
+          "MAPE": 47.80404281616211
+        },
+        {
+          "horizon": 6,
+          "RMSE": 48.83550262451172,
+          "MAE": 27.797916412353516,
+          "MAPE": 55.7896614074707
+        }
+      ],
+      "station_metrics_best3": [
+        {
+          "station": "Huairou",
+          "RMSE": 30.49724769592285,
+          "MAE": 15.594883918762207,
+          "MAPE": 32.47713851928711
+        },
+        {
+          "station": "Dingling",
+          "RMSE": 33.88575744628906,
+          "MAE": 17.04546356201172,
+          "MAPE": 41.266876220703125
+        },
+        {
+          "station": "Changping",
+          "RMSE": 34.13505935668945,
+          "MAE": 17.92198944091797,
+          "MAPE": 39.76762390136719
+        }
+      ],
+      "station_metrics_worst3": [
+        {
+          "station": "Dongsi",
+          "RMSE": 41.0658073425293,
+          "MAE": 22.330249786376953,
+          "MAPE": 36.130306243896484
+        },
+        {
+          "station": "Wanshouxigong",
+          "RMSE": 42.33600616455078,
+          "MAE": 22.19165802001953,
+          "MAPE": 35.09687805175781
+        },
+        {
+          "station": "Gucheng",
+          "RMSE": 41.50959396362305,
+          "MAE": 21.251312255859375,
+          "MAPE": 39.489925384521484
+        }
+      ],
+      "trainable_params": 80322
+    },
+    {
+      "checkpoint": "models/checkpoints/transformer/graph_transformer_gat_v1_residual_log1p_all_std_stationbias_T4_best.pt",
+      "file_name": "graph_transformer_gat_v1_residual_log1p_all_std_stationbias_T4_best.pt",
+      "architecture_name": "graph_transformer_gat_v1_residual_log1p_all_std_stationbias",
+      "epoch": 6,
+      "val_loss": 0.19767170065280162,
+      "val_mae": 18.217796325683594,
+      "device_used": "cpu",
+      "input_dim": 33,
+      "used_feature_cols": [
+        "pm2.5",
+        "pm10",
+        "so2",
+        "no2",
+        "co",
+        "o3",
+        "temp",
+        "pres",
+        "dewp",
+        "rain",
+        "wspm",
+        "hour_sin",
+        "hour_cos",
+        "month_sin",
+        "month_cos",
+        "weekday_sin",
+        "weekday_cos",
+        "wd_E",
+        "wd_ENE",
+        "wd_ESE",
+        "wd_N",
+        "wd_NE",
+        "wd_NNE",
+        "wd_NNW",
+        "wd_NW",
+        "wd_S",
+        "wd_SE",
+        "wd_SSE",
+        "wd_SSW",
+        "wd_SW",
+        "wd_W",
+        "wd_WNW",
+        "wd_WSW"
+      ],
+      "config": {
+        "model_type": "graph_transformer",
+        "graph_conv": "gat",
+        "gat_version": "v1",
+        "num_tf_layers": 2,
+        "ffn_dim": 128,
+        "num_gat_layers": 1,
+        "use_direct_decoding": true,
+        "use_wind_adjacency": true,
+        "use_learnable_alpha_gate": true,
+        "use_learnable_sigma": false,
+        "use_node_embeddings": true,
+        "use_temporal_attention_head": false,
+        "use_post_temporal_gat": false,
+        "use_t24_residual": false,
+        "use_horizon_residual_weights": false,
+        "use_learnable_static_adj": false,
+        "use_multitask": false,
+        "use_station_horizon_bias": true,
+        "use_regime_conditioning": false,
+        "use_future_met": false,
+        "met_forecast_mode": "oracle",
+        "wind_direction_method": "circular",
+        "wind_temporal_graphs": 1,
+        "wind_temporal_graph_window": null,
+        "use_pm25_delta": false,
+        "use_holiday_feature": false,
+        "use_persistence_residual": true,
+        "use_per_station_norm": false,
+        "residual_window": 1,
+        "use_trend_residual": false,
+        "use_revin": false,
+        "target_feature_idx": 0,
+        "use_log_transform": true,
+        "loss_type": "evt_hybrid"
+      },
+      "load_info": {
+        "missing_keys": [],
+        "unexpected_keys": [],
+        "partial_load": false
+      },
+      "learned_wind_alpha": 0.4377548098564148,
+      "learned_distance_sigma": null,
+      "is_original_scale": true,
+      "overall": {
+        "RMSE": 37.47624588012695,
+        "MAE": 19.794668197631836,
+        "MAPE": 36.72719955444336,
+        "R2": 0.8356707096099854,
+        "horizon_mae": [
+          9.94092845916748,
+          15.066040992736816,
+          18.80240249633789,
+          22.124732971191406,
+          25.062381744384766,
+          27.77152442932129
+        ]
+      },
+      "horizon_metrics": [
+        {
+          "horizon": 1,
+          "RMSE": 19.46697998046875,
+          "MAE": 9.94092845916748,
+          "MAPE": 17.79433822631836
+        },
+        {
+          "horizon": 2,
+          "RMSE": 28.797779083251953,
+          "MAE": 15.066040992736816,
+          "MAPE": 25.68914222717285
+        },
+        {
+          "horizon": 3,
+          "RMSE": 35.02669906616211,
+          "MAE": 18.80240249633789,
+          "MAPE": 32.769126892089844
+        },
+        {
+          "horizon": 4,
+          "RMSE": 40.214664459228516,
+          "MAE": 22.124732971191406,
+          "MAPE": 40.29322052001953
+        },
+        {
+          "horizon": 5,
+          "RMSE": 44.695472717285156,
+          "MAE": 25.062381744384766,
+          "MAPE": 47.92496871948242
+        },
+        {
+          "horizon": 6,
+          "RMSE": 48.7520751953125,
+          "MAE": 27.77152442932129,
+          "MAPE": 55.89240264892578
+        }
+      ],
+      "station_metrics_best3": [
+        {
+          "station": "Huairou",
+          "RMSE": 30.535924911499023,
+          "MAE": 15.642898559570312,
+          "MAPE": 32.541690826416016
+        },
+        {
+          "station": "Dingling",
+          "RMSE": 33.799015045166016,
+          "MAE": 17.116209030151367,
+          "MAPE": 41.32746887207031
+        },
+        {
+          "station": "Changping",
+          "RMSE": 34.15177917480469,
+          "MAE": 17.938491821289062,
+          "MAPE": 39.78946304321289
+        }
+      ],
+      "station_metrics_worst3": [
+        {
+          "station": "Dongsi",
+          "RMSE": 41.04847717285156,
+          "MAE": 22.25554084777832,
+          "MAPE": 36.27409362792969
+        },
+        {
+          "station": "Wanshouxigong",
+          "RMSE": 42.189579010009766,
+          "MAE": 22.07679557800293,
+          "MAPE": 35.19109344482422
+        },
+        {
+          "station": "Gucheng",
+          "RMSE": 41.56032180786133,
+          "MAE": 21.321178436279297,
+          "MAPE": 39.43031692504883
+        }
+      ],
+      "trainable_params": 80394
+    },
+    {
+      "checkpoint": "models/checkpoints/transformer/graph_transformer_gat_v1_residual_log1p_all_std_stationbias_regime_T4_best.pt",
+      "file_name": "graph_transformer_gat_v1_residual_log1p_all_std_stationbias_regime_T4_best.pt",
+      "architecture_name": "graph_transformer_gat_v1_residual_log1p_all_std_stationbias_regime",
+      "epoch": 2,
+      "val_loss": 0.2022517714085001,
+      "val_mae": 18.350683212280273,
+      "device_used": "cpu",
+      "input_dim": 33,
+      "used_feature_cols": [
+        "pm2.5",
+        "pm10",
+        "so2",
+        "no2",
+        "co",
+        "o3",
+        "temp",
+        "pres",
+        "dewp",
+        "rain",
+        "wspm",
+        "hour_sin",
+        "hour_cos",
+        "month_sin",
+        "month_cos",
+        "weekday_sin",
+        "weekday_cos",
+        "wd_E",
+        "wd_ENE",
+        "wd_ESE",
+        "wd_N",
+        "wd_NE",
+        "wd_NNE",
+        "wd_NNW",
+        "wd_NW",
+        "wd_S",
+        "wd_SE",
+        "wd_SSE",
+        "wd_SSW",
+        "wd_SW",
+        "wd_W",
+        "wd_WNW",
+        "wd_WSW"
+      ],
+      "config": {
+        "model_type": "graph_transformer",
+        "graph_conv": "gat",
+        "gat_version": "v1",
+        "num_tf_layers": 2,
+        "ffn_dim": 128,
+        "num_gat_layers": 1,
+        "use_direct_decoding": true,
+        "use_wind_adjacency": true,
+        "use_learnable_alpha_gate": true,
+        "use_learnable_sigma": false,
+        "use_node_embeddings": true,
+        "use_temporal_attention_head": false,
+        "use_post_temporal_gat": false,
+        "use_t24_residual": false,
+        "use_horizon_residual_weights": false,
+        "use_learnable_static_adj": false,
+        "use_multitask": false,
+        "use_station_horizon_bias": true,
+        "use_regime_conditioning": true,
+        "use_future_met": false,
+        "met_forecast_mode": "oracle",
+        "wind_direction_method": "circular",
+        "wind_temporal_graphs": 1,
+        "wind_temporal_graph_window": null,
+        "use_pm25_delta": false,
+        "use_holiday_feature": false,
+        "use_persistence_residual": true,
+        "use_per_station_norm": false,
+        "residual_window": 1,
+        "use_trend_residual": false,
+        "use_revin": false,
+        "target_feature_idx": 0,
+        "use_log_transform": true,
+        "loss_type": "evt_hybrid"
+      },
+      "load_info": {
+        "missing_keys": [],
+        "unexpected_keys": [],
+        "partial_load": false
+      },
+      "learned_wind_alpha": 0.5046719312667847,
+      "learned_distance_sigma": null,
+      "is_original_scale": true,
+      "overall": {
+        "RMSE": 37.8993034362793,
+        "MAE": 20.120161056518555,
+        "MAPE": 38.65850830078125,
+        "R2": 0.8319396376609802,
+        "horizon_mae": [
+          10.069281578063965,
+          15.299139976501465,
+          19.071792602539062,
+          22.390064239501953,
+          25.484411239624023,
+          28.40627670288086
+        ]
+      },
+      "horizon_metrics": [
+        {
+          "horizon": 1,
+          "RMSE": 19.5941162109375,
+          "MAE": 10.069281578063965,
+          "MAPE": 18.510936737060547
+        },
+        {
+          "horizon": 2,
+          "RMSE": 28.878414154052734,
+          "MAE": 15.299139976501465,
+          "MAPE": 26.78598403930664
+        },
+        {
+          "horizon": 3,
+          "RMSE": 35.12204360961914,
+          "MAE": 19.071792602539062,
+          "MAPE": 34.37476348876953
+        },
+        {
+          "horizon": 4,
+          "RMSE": 40.49726486206055,
+          "MAE": 22.390064239501953,
+          "MAPE": 42.18581771850586
+        },
+        {
+          "horizon": 5,
+          "RMSE": 45.306053161621094,
+          "MAE": 25.484411239624023,
+          "MAPE": 50.71209716796875
+        },
+        {
+          "horizon": 6,
+          "RMSE": 49.73957443237305,
+          "MAE": 28.40627670288086,
+          "MAPE": 59.381465911865234
+        }
+      ],
+      "station_metrics_best3": [
+        {
+          "station": "Huairou",
+          "RMSE": 30.277767181396484,
+          "MAE": 15.787092208862305,
+          "MAPE": 34.376888275146484
+        },
+        {
+          "station": "Dingling",
+          "RMSE": 34.74940872192383,
+          "MAE": 17.797237396240234,
+          "MAPE": 43.18431091308594
+        },
+        {
+          "station": "Changping",
+          "RMSE": 35.311763763427734,
+          "MAE": 18.540164947509766,
+          "MAPE": 42.88044357299805
+        }
+      ],
+      "station_metrics_worst3": [
+        {
+          "station": "Dongsi",
+          "RMSE": 41.58803939819336,
+          "MAE": 22.580244064331055,
+          "MAPE": 38.16178894042969
+        },
+        {
+          "station": "Wanshouxigong",
+          "RMSE": 42.733707427978516,
+          "MAE": 22.4622859954834,
+          "MAPE": 36.59953308105469
+        },
+        {
+          "station": "Gucheng",
+          "RMSE": 41.996559143066406,
+          "MAE": 21.474212646484375,
+          "MAPE": 40.50727462768555
+        }
+      ],
+      "trainable_params": 80522
+    },
+    {
+      "checkpoint": "models/checkpoints/transformer/graph_transformer_gat_v1_residual_log1p_all_std_stationbias_revin_T4_best.pt",
+      "file_name": "graph_transformer_gat_v1_residual_log1p_all_std_stationbias_revin_T4_best.pt",
+      "architecture_name": "graph_transformer_gat_v1_residual_log1p_all_std_stationbias_revin",
+      "epoch": 4,
+      "val_loss": 0.21906443443713766,
+      "val_mae": 18.89791488647461,
+      "device_used": "cpu",
+      "input_dim": 33,
+      "used_feature_cols": [
+        "pm2.5",
+        "pm10",
+        "so2",
+        "no2",
+        "co",
+        "o3",
+        "temp",
+        "pres",
+        "dewp",
+        "rain",
+        "wspm",
+        "hour_sin",
+        "hour_cos",
+        "month_sin",
+        "month_cos",
+        "weekday_sin",
+        "weekday_cos",
+        "wd_E",
+        "wd_ENE",
+        "wd_ESE",
+        "wd_N",
+        "wd_NE",
+        "wd_NNE",
+        "wd_NNW",
+        "wd_NW",
+        "wd_S",
+        "wd_SE",
+        "wd_SSE",
+        "wd_SSW",
+        "wd_SW",
+        "wd_W",
+        "wd_WNW",
+        "wd_WSW"
+      ],
+      "config": {
+        "model_type": "graph_transformer",
+        "graph_conv": "gat",
+        "gat_version": "v1",
+        "num_tf_layers": 2,
+        "ffn_dim": 128,
+        "num_gat_layers": 1,
+        "use_direct_decoding": true,
+        "use_wind_adjacency": true,
+        "use_learnable_alpha_gate": true,
+        "use_learnable_sigma": false,
+        "use_node_embeddings": true,
+        "use_temporal_attention_head": false,
+        "use_post_temporal_gat": false,
+        "use_t24_residual": false,
+        "use_horizon_residual_weights": false,
+        "use_learnable_static_adj": false,
+        "use_multitask": false,
+        "use_station_horizon_bias": true,
+        "use_regime_conditioning": true,
+        "use_future_met": false,
+        "met_forecast_mode": "oracle",
+        "wind_direction_method": "circular",
+        "wind_temporal_graphs": 1,
+        "wind_temporal_graph_window": null,
+        "use_pm25_delta": false,
+        "use_holiday_feature": false,
+        "use_persistence_residual": true,
+        "use_per_station_norm": false,
+        "residual_window": 1,
+        "use_trend_residual": false,
+        "use_revin": true,
+        "target_feature_idx": 0,
+        "use_log_transform": true,
+        "loss_type": "evt_hybrid"
+      },
+      "load_info": {
+        "missing_keys": [],
+        "unexpected_keys": [],
+        "partial_load": false
+      },
+      "learned_wind_alpha": 0.46144309639930725,
+      "learned_distance_sigma": null,
+      "is_original_scale": true,
+      "overall": {
+        "RMSE": 39.092960357666016,
+        "MAE": 20.722919464111328,
+        "MAPE": 39.733089447021484,
+        "R2": 0.8211866617202759,
+        "horizon_mae": [
+          10.08773136138916,
+          15.54227066040039,
+          19.58963394165039,
+          23.139022827148438,
+          26.468814849853516,
+          29.510059356689453
+        ]
+      },
+      "horizon_metrics": [
+        {
+          "horizon": 1,
+          "RMSE": 19.73770523071289,
+          "MAE": 10.08773136138916,
+          "MAPE": 18.84479331970215
+        },
+        {
+          "horizon": 2,
+          "RMSE": 29.332155227661133,
+          "MAE": 15.54227066040039,
+          "MAPE": 27.59602928161621
+        },
+        {
+          "horizon": 3,
+          "RMSE": 36.04124069213867,
+          "MAE": 19.58963394165039,
+          "MAPE": 35.531471252441406
+        },
+        {
+          "horizon": 4,
+          "RMSE": 41.88031768798828,
+          "MAE": 23.139022827148438,
+          "MAPE": 43.753849029541016
+        },
+        {
+          "horizon": 5,
+          "RMSE": 47.06334686279297,
+          "MAE": 26.468814849853516,
+          "MAPE": 52.144466400146484
+        },
+        {
+          "horizon": 6,
+          "RMSE": 51.494808197021484,
+          "MAE": 29.510059356689453,
+          "MAPE": 60.527915954589844
+        }
+      ],
+      "station_metrics_best3": [
+        {
+          "station": "Huairou",
+          "RMSE": 31.5683536529541,
+          "MAE": 16.381526947021484,
+          "MAPE": 35.66749572753906
+        },
+        {
+          "station": "Dingling",
+          "RMSE": 34.97951889038086,
+          "MAE": 17.743154525756836,
+          "MAPE": 43.14107131958008
+        },
+        {
+          "station": "Changping",
+          "RMSE": 35.193519592285156,
+          "MAE": 18.713512420654297,
+          "MAPE": 42.159210205078125
+        }
+      ],
+      "station_metrics_worst3": [
+        {
+          "station": "Dongsi",
+          "RMSE": 45.95353698730469,
+          "MAE": 23.7330322265625,
+          "MAPE": 39.06137466430664
+        },
+        {
+          "station": "Wanshouxigong",
+          "RMSE": 43.42902755737305,
+          "MAE": 22.926265716552734,
+          "MAPE": 38.7535400390625
+        },
+        {
+          "station": "Gucheng",
+          "RMSE": 43.55374526977539,
+          "MAE": 22.291563034057617,
+          "MAPE": 44.07377624511719
+        }
+      ],
+      "trainable_params": 80522
+    },
+    {
+      "checkpoint": "models/checkpoints/transformer/graph_transformer_gat_v1_residual_log1p_all_std_stationbias_rollingmean_T4_best.pt",
+      "file_name": "graph_transformer_gat_v1_residual_log1p_all_std_stationbias_rollingmean_T4_best.pt",
+      "architecture_name": "graph_transformer_gat_v1_residual_log1p_all_std_stationbias_rollingmean",
+      "epoch": 4,
+      "val_loss": 0.20722667621166418,
+      "val_mae": 19.150562286376953,
+      "device_used": "cpu",
+      "input_dim": 33,
+      "used_feature_cols": [
+        "pm2.5",
+        "pm10",
+        "so2",
+        "no2",
+        "co",
+        "o3",
+        "temp",
+        "pres",
+        "dewp",
+        "rain",
+        "wspm",
+        "hour_sin",
+        "hour_cos",
+        "month_sin",
+        "month_cos",
+        "weekday_sin",
+        "weekday_cos",
+        "wd_E",
+        "wd_ENE",
+        "wd_ESE",
+        "wd_N",
+        "wd_NE",
+        "wd_NNE",
+        "wd_NNW",
+        "wd_NW",
+        "wd_S",
+        "wd_SE",
+        "wd_SSE",
+        "wd_SSW",
+        "wd_SW",
+        "wd_W",
+        "wd_WNW",
+        "wd_WSW"
+      ],
+      "config": {
+        "model_type": "graph_transformer",
+        "graph_conv": "gat",
+        "gat_version": "v1",
+        "num_tf_layers": 2,
+        "ffn_dim": 128,
+        "num_gat_layers": 1,
+        "use_direct_decoding": true,
+        "use_wind_adjacency": true,
+        "use_learnable_alpha_gate": true,
+        "use_learnable_sigma": false,
+        "use_node_embeddings": true,
+        "use_temporal_attention_head": false,
+        "use_post_temporal_gat": false,
+        "use_t24_residual": false,
+        "use_horizon_residual_weights": false,
+        "use_learnable_static_adj": false,
+        "use_multitask": false,
+        "use_station_horizon_bias": true,
+        "use_regime_conditioning": false,
+        "use_future_met": false,
+        "met_forecast_mode": "oracle",
+        "wind_direction_method": "circular",
+        "wind_temporal_graphs": 1,
+        "wind_temporal_graph_window": null,
+        "use_pm25_delta": false,
+        "use_holiday_feature": false,
+        "use_persistence_residual": true,
+        "use_per_station_norm": false,
+        "residual_window": 6,
+        "use_trend_residual": false,
+        "use_revin": false,
+        "target_feature_idx": 0,
+        "use_log_transform": true,
+        "loss_type": "evt_hybrid"
+      },
+      "load_info": {
+        "missing_keys": [],
+        "unexpected_keys": [],
+        "partial_load": false
+      },
+      "learned_wind_alpha": 0.5256693959236145,
+      "learned_distance_sigma": null,
+      "is_original_scale": true,
+      "overall": {
+        "RMSE": 39.438968658447266,
+        "MAE": 21.096132278442383,
+        "MAPE": 39.25414276123047,
+        "R2": 0.8180073499679565,
+        "horizon_mae": [
+          12.091632843017578,
+          16.308181762695312,
+          19.867382049560547,
+          23.127649307250977,
+          26.123043060302734,
+          29.058900833129883
+        ]
+      },
+      "horizon_metrics": [
+        {
+          "horizon": 1,
+          "RMSE": 22.96184730529785,
+          "MAE": 12.091632843017578,
+          "MAPE": 20.307422637939453
+        },
+        {
+          "horizon": 2,
+          "RMSE": 30.805721282958984,
+          "MAE": 16.308181762695312,
+          "MAPE": 27.83336639404297
+        },
+        {
+          "horizon": 3,
+          "RMSE": 36.80702209472656,
+          "MAE": 19.867382049560547,
+          "MAPE": 35.05515670776367
+        },
+        {
+          "horizon": 4,
+          "RMSE": 42.02082061767578,
+          "MAE": 23.127649307250977,
+          "MAPE": 42.82392883300781
+        },
+        {
+          "horizon": 5,
+          "RMSE": 46.55490493774414,
+          "MAE": 26.123043060302734,
+          "MAPE": 50.84605407714844
+        },
+        {
+          "horizon": 6,
+          "RMSE": 50.680267333984375,
+          "MAE": 29.058900833129883,
+          "MAPE": 58.658939361572266
+        }
+      ],
+      "station_metrics_best3": [
+        {
+          "station": "Huairou",
+          "RMSE": 32.08492660522461,
+          "MAE": 16.825401306152344,
+          "MAPE": 35.02477264404297
+        },
+        {
+          "station": "Dingling",
+          "RMSE": 34.94829177856445,
+          "MAE": 18.08897590637207,
+          "MAPE": 41.93898010253906
+        },
+        {
+          "station": "Changping",
+          "RMSE": 34.75740432739258,
+          "MAE": 18.631877899169922,
+          "MAPE": 41.077579498291016
+        }
+      ],
+      "station_metrics_worst3": [
+        {
+          "station": "Dongsi",
+          "RMSE": 45.71440505981445,
+          "MAE": 24.463254928588867,
+          "MAPE": 39.61895751953125
+        },
+        {
+          "station": "Wanshouxigong",
+          "RMSE": 44.45508575439453,
+          "MAE": 23.41982650756836,
+          "MAPE": 38.0673828125
+        },
+        {
+          "station": "Gucheng",
+          "RMSE": 43.43562698364258,
+          "MAE": 22.88324737548828,
+          "MAPE": 42.082847595214844
+        }
+      ],
+      "trainable_params": 80394
+    },
+    {
+      "checkpoint": "models/checkpoints/transformer/graph_transformer_gat_v1_residual_log1p_all_std_stationbias_trend_T4_best.pt",
+      "file_name": "graph_transformer_gat_v1_residual_log1p_all_std_stationbias_trend_T4_best.pt",
+      "architecture_name": "graph_transformer_gat_v1_residual_log1p_all_std_stationbias_trend",
+      "epoch": 13,
+      "val_loss": 0.20101956428226198,
+      "val_mae": 18.345958709716797,
+      "device_used": "cpu",
+      "input_dim": 33,
+      "used_feature_cols": [
+        "pm2.5",
+        "pm10",
+        "so2",
+        "no2",
+        "co",
+        "o3",
+        "temp",
+        "pres",
+        "dewp",
+        "rain",
+        "wspm",
+        "hour_sin",
+        "hour_cos",
+        "month_sin",
+        "month_cos",
+        "weekday_sin",
+        "weekday_cos",
+        "wd_E",
+        "wd_ENE",
+        "wd_ESE",
+        "wd_N",
+        "wd_NE",
+        "wd_NNE",
+        "wd_NNW",
+        "wd_NW",
+        "wd_S",
+        "wd_SE",
+        "wd_SSE",
+        "wd_SSW",
+        "wd_SW",
+        "wd_W",
+        "wd_WNW",
+        "wd_WSW"
+      ],
+      "config": {
+        "model_type": "graph_transformer",
+        "graph_conv": "gat",
+        "gat_version": "v1",
+        "num_tf_layers": 2,
+        "ffn_dim": 128,
+        "num_gat_layers": 1,
+        "use_direct_decoding": true,
+        "use_wind_adjacency": true,
+        "use_learnable_alpha_gate": true,
+        "use_learnable_sigma": false,
+        "use_node_embeddings": true,
+        "use_temporal_attention_head": false,
+        "use_post_temporal_gat": false,
+        "use_t24_residual": false,
+        "use_horizon_residual_weights": false,
+        "use_learnable_static_adj": false,
+        "use_multitask": false,
+        "use_station_horizon_bias": true,
+        "use_regime_conditioning": false,
+        "use_future_met": false,
+        "met_forecast_mode": "oracle",
+        "wind_direction_method": "circular",
+        "wind_temporal_graphs": 1,
+        "wind_temporal_graph_window": null,
+        "use_pm25_delta": false,
+        "use_holiday_feature": false,
+        "use_persistence_residual": true,
+        "use_per_station_norm": false,
+        "residual_window": 1,
+        "use_trend_residual": true,
+        "use_revin": false,
+        "target_feature_idx": 0,
+        "use_log_transform": true,
+        "loss_type": "evt_hybrid"
+      },
+      "load_info": {
+        "missing_keys": [],
+        "unexpected_keys": [],
+        "partial_load": false
+      },
+      "learned_wind_alpha": 0.3249688148498535,
+      "learned_distance_sigma": null,
+      "is_original_scale": true,
+      "overall": {
+        "RMSE": 38.72101593017578,
+        "MAE": 20.078054428100586,
+        "MAPE": 37.15904998779297,
+        "R2": 0.8245730400085449,
+        "horizon_mae": [
+          9.795804977416992,
+          15.058902740478516,
+          19.028186798095703,
+          22.460264205932617,
+          25.537776947021484,
+          28.5873966217041
+        ]
+      },
+      "horizon_metrics": [
+        {
+          "horizon": 1,
+          "RMSE": 19.337753295898438,
+          "MAE": 9.795804977416992,
+          "MAPE": 17.372072219848633
+        },
+        {
+          "horizon": 2,
+          "RMSE": 29.106111526489258,
+          "MAE": 15.058902740478516,
+          "MAPE": 25.30626106262207
+        },
+        {
+          "horizon": 3,
+          "RMSE": 36.1408576965332,
+          "MAE": 19.028186798095703,
+          "MAPE": 32.678958892822266
+        },
+        {
+          "horizon": 4,
+          "RMSE": 41.36002731323242,
+          "MAE": 22.460264205932617,
+          "MAPE": 40.5799674987793
+        },
+        {
+          "horizon": 5,
+          "RMSE": 46.17817306518555,
+          "MAE": 25.537776947021484,
+          "MAPE": 49.183406829833984
+        },
+        {
+          "horizon": 6,
+          "RMSE": 51.24012756347656,
+          "MAE": 28.5873966217041,
+          "MAPE": 57.833648681640625
+        }
+      ],
+      "station_metrics_best3": [
+        {
+          "station": "Huairou",
+          "RMSE": 30.8005428314209,
+          "MAE": 15.651604652404785,
+          "MAPE": 32.756622314453125
+        },
+        {
+          "station": "Dingling",
+          "RMSE": 34.33380889892578,
+          "MAE": 17.051692962646484,
+          "MAPE": 41.28289031982422
+        },
+        {
+          "station": "Changping",
+          "RMSE": 34.189449310302734,
+          "MAE": 17.713979721069336,
+          "MAPE": 40.0830192565918
+        }
+      ],
+      "station_metrics_worst3": [
+        {
+          "station": "Dongsi",
+          "RMSE": 43.737388610839844,
+          "MAE": 22.899097442626953,
+          "MAPE": 36.936222076416016
+        },
+        {
+          "station": "Wanshouxigong",
+          "RMSE": 44.228275299072266,
+          "MAE": 22.675884246826172,
+          "MAPE": 35.863792419433594
+        },
+        {
+          "station": "Gucheng",
+          "RMSE": 43.254215240478516,
+          "MAE": 21.80299186706543,
+          "MAPE": 40.14348220825195
+        }
+      ],
+      "trainable_params": 80394
+    },
+    {
+      "checkpoint": "models/checkpoints/transformer/graph_transformer_gat_v1_residual_metpred_T4_best.pt",
+      "file_name": "graph_transformer_gat_v1_residual_metpred_T4_best.pt",
+      "architecture_name": "graph_transformer_gat_v1_residual_metpred",
+      "epoch": 19,
+      "val_loss": 0.0019295579515693879,
+      "val_mae": 17.807785034179688,
+      "device_used": "cpu",
+      "input_dim": 33,
+      "used_feature_cols": [
+        "pm2.5",
+        "pm10",
+        "so2",
+        "no2",
+        "co",
+        "o3",
+        "temp",
+        "pres",
+        "dewp",
+        "rain",
+        "wspm",
+        "hour_sin",
+        "hour_cos",
+        "month_sin",
+        "month_cos",
+        "weekday_sin",
+        "weekday_cos",
+        "wd_E",
+        "wd_ENE",
+        "wd_ESE",
+        "wd_N",
+        "wd_NE",
+        "wd_NNE",
+        "wd_NNW",
+        "wd_NW",
+        "wd_S",
+        "wd_SE",
+        "wd_SSE",
+        "wd_SSW",
+        "wd_SW",
+        "wd_W",
+        "wd_WNW",
+        "wd_WSW"
+      ],
+      "config": {
+        "model_type": "graph_transformer",
+        "graph_conv": "gat",
+        "gat_version": "v1",
+        "num_tf_layers": 2,
+        "ffn_dim": 128,
+        "num_gat_layers": 1,
+        "use_direct_decoding": true,
+        "use_wind_adjacency": true,
+        "use_learnable_alpha_gate": true,
+        "use_learnable_sigma": false,
+        "use_node_embeddings": true,
+        "use_temporal_attention_head": false,
+        "use_post_temporal_gat": false,
+        "use_t24_residual": false,
+        "use_horizon_residual_weights": false,
+        "use_learnable_static_adj": false,
+        "use_multitask": false,
+        "use_station_horizon_bias": false,
+        "use_regime_conditioning": false,
+        "use_future_met": true,
+        "met_forecast_mode": "persistence",
+        "wind_direction_method": "circular",
+        "wind_temporal_graphs": 1,
+        "wind_temporal_graph_window": null,
+        "use_pm25_delta": false,
+        "use_holiday_feature": false,
+        "use_persistence_residual": true,
+        "use_per_station_norm": false,
+        "residual_window": 1,
+        "use_trend_residual": false,
+        "use_revin": false,
+        "target_feature_idx": 0,
+        "use_log_transform": false,
+        "loss_type": "evt_hybrid"
+      },
+      "load_info": {
+        "missing_keys": [],
+        "unexpected_keys": [],
+        "partial_load": false
+      },
+      "learned_wind_alpha": 0.4983638525009155,
+      "learned_distance_sigma": null,
+      "is_original_scale": true,
+      "overall": {
+        "RMSE": 43.66948318481445,
+        "MAE": 23.944244384765625,
+        "MAPE": 54.77696228027344,
+        "R2": 0.776869535446167,
+        "horizon_mae": [
+          11.983457565307617,
+          18.193429946899414,
+          22.890384674072266,
+          26.863866806030273,
+          30.334875106811523,
+          33.399444580078125
+        ]
+      },
+      "horizon_metrics": [
+        {
+          "horizon": 1,
+          "RMSE": 21.60649871826172,
+          "MAE": 11.983457565307617,
+          "MAPE": 27.00682830810547
+        },
+        {
+          "horizon": 2,
+          "RMSE": 32.812294006347656,
+          "MAE": 18.193429946899414,
+          "MAPE": 39.76861572265625
+        },
+        {
+          "horizon": 3,
+          "RMSE": 40.68612289428711,
+          "MAE": 22.890384674072266,
+          "MAPE": 50.74372100830078
+        },
+        {
+          "horizon": 4,
+          "RMSE": 47.07375717163086,
+          "MAE": 26.863866806030273,
+          "MAPE": 61.039207458496094
+        },
+        {
+          "horizon": 5,
+          "RMSE": 52.4859504699707,
+          "MAE": 30.334875106811523,
+          "MAPE": 70.62013244628906
+        },
+        {
+          "horizon": 6,
+          "RMSE": 57.20646667480469,
+          "MAE": 33.399444580078125,
+          "MAPE": 79.4832534790039
+        }
+      ],
+      "station_metrics_best3": [
+        {
+          "station": "Dingling",
+          "RMSE": 34.35026931762695,
+          "MAE": 18.554601669311523,
+          "MAPE": 53.174739837646484
+        },
+        {
+          "station": "Huairou",
+          "RMSE": 36.082576751708984,
+          "MAE": 19.23503303527832,
+          "MAPE": 50.63954544067383
+        },
+        {
+          "station": "Changping",
+          "RMSE": 37.85817337036133,
+          "MAE": 20.771669387817383,
+          "MAPE": 53.866966247558594
+        }
+      ],
+      "station_metrics_worst3": [
+        {
+          "station": "Dongsi",
+          "RMSE": 49.185054779052734,
+          "MAE": 26.937454223632812,
+          "MAPE": 54.1309814453125
+        },
+        {
+          "station": "Wanshouxigong",
+          "RMSE": 48.991397857666016,
+          "MAE": 26.832782745361328,
+          "MAPE": 56.66759490966797
+        },
+        {
+          "station": "Gucheng",
+          "RMSE": 47.72547149658203,
+          "MAE": 26.16860580444336,
+          "MAPE": 60.09525680541992
+        }
+      ],
+      "trainable_params": 81730
+    },
+    {
+      "checkpoint": "models/checkpoints/transformer/graph_transformer_gat_v1_residual_multiscale_T4_best.pt",
+      "file_name": "graph_transformer_gat_v1_residual_multiscale_T4_best.pt",
+      "architecture_name": "graph_transformer_gat_v1_residual_multiscale",
+      "epoch": 38,
+      "val_loss": 0.002211757243783337,
+      "val_mae": 18.78335189819336,
+      "device_used": "cpu",
+      "input_dim": 33,
+      "used_feature_cols": [
+        "pm2.5",
+        "pm10",
+        "so2",
+        "no2",
+        "co",
+        "o3",
+        "temp",
+        "pres",
+        "dewp",
+        "rain",
+        "wspm",
+        "hour_sin",
+        "hour_cos",
+        "month_sin",
+        "month_cos",
+        "weekday_sin",
+        "weekday_cos",
+        "wd_E",
+        "wd_ENE",
+        "wd_ESE",
+        "wd_N",
+        "wd_NE",
+        "wd_NNE",
+        "wd_NNW",
+        "wd_NW",
+        "wd_S",
+        "wd_SE",
+        "wd_SSE",
+        "wd_SSW",
+        "wd_SW",
+        "wd_W",
+        "wd_WNW",
+        "wd_WSW"
+      ],
+      "config": {
+        "model_type": "graph_transformer",
+        "graph_conv": "gat",
+        "gat_version": "v1",
+        "num_tf_layers": 2,
+        "ffn_dim": 128,
+        "num_gat_layers": 1,
+        "use_direct_decoding": true,
+        "use_wind_adjacency": true,
+        "use_learnable_alpha_gate": true,
+        "use_learnable_sigma": false,
+        "use_node_embeddings": true,
+        "use_temporal_attention_head": false,
+        "use_post_temporal_gat": false,
+        "use_t24_residual": false,
+        "use_horizon_residual_weights": false,
+        "use_learnable_static_adj": false,
+        "use_multitask": false,
+        "use_station_horizon_bias": false,
+        "use_regime_conditioning": false,
+        "use_future_met": false,
+        "met_forecast_mode": "oracle",
+        "wind_direction_method": "circular",
+        "wind_temporal_graphs": 1,
+        "wind_temporal_graph_window": null,
+        "use_pm25_delta": false,
+        "use_holiday_feature": false,
+        "use_persistence_residual": true,
+        "use_per_station_norm": false,
+        "residual_window": 1,
+        "use_trend_residual": false,
+        "use_revin": false,
+        "target_feature_idx": 0,
+        "use_log_transform": false,
+        "loss_type": "evt_hybrid"
+      },
+      "load_info": {
+        "missing_keys": [],
+        "unexpected_keys": [],
+        "partial_load": false
+      },
+      "learned_wind_alpha": 0.500417172908783,
+      "learned_distance_sigma": null,
+      "is_original_scale": true,
+      "overall": {
+        "RMSE": 43.96261978149414,
+        "MAE": 23.593528747558594,
+        "MAPE": 55.11476516723633,
+        "R2": 0.7738639116287231,
+        "horizon_mae": [
+          11.025654792785645,
+          17.563617706298828,
+          22.515254974365234,
+          26.67321014404297,
+          30.290836334228516,
+          33.49259948730469
+        ]
+      },
+      "horizon_metrics": [
+        {
+          "horizon": 1,
+          "RMSE": 20.978824615478516,
+          "MAE": 11.025654792785645,
+          "MAPE": 24.201812744140625
+        },
+        {
+          "horizon": 2,
+          "RMSE": 32.6186637878418,
+          "MAE": 17.563617706298828,
+          "MAPE": 38.50807571411133
+        },
+        {
+          "horizon": 3,
+          "RMSE": 40.8175048828125,
+          "MAE": 22.515254974365234,
+          "MAPE": 50.63648986816406
+        },
+        {
+          "horizon": 4,
+          "RMSE": 47.44346237182617,
+          "MAE": 26.67321014404297,
+          "MAPE": 62.005435943603516
+        },
+        {
+          "horizon": 5,
+          "RMSE": 53.05714416503906,
+          "MAE": 30.290836334228516,
+          "MAPE": 72.68863677978516
+        },
+        {
+          "horizon": 6,
+          "RMSE": 57.96699142456055,
+          "MAE": 33.49259948730469,
+          "MAPE": 82.64813995361328
+        }
+      ],
+      "station_metrics_best3": [
+        {
+          "station": "Dingling",
+          "RMSE": 34.6861686706543,
+          "MAE": 18.111459732055664,
+          "MAPE": 52.80646514892578
+        },
+        {
+          "station": "Huairou",
+          "RMSE": 36.149749755859375,
+          "MAE": 18.958433151245117,
+          "MAPE": 51.10432434082031
+        },
+        {
+          "station": "Changping",
+          "RMSE": 38.49262237548828,
+          "MAE": 20.68562126159668,
+          "MAPE": 55.600799560546875
+        }
+      ],
+      "station_metrics_worst3": [
+        {
+          "station": "Dongsi",
+          "RMSE": 49.714942932128906,
+          "MAE": 26.816694259643555,
+          "MAPE": 55.675018310546875
+        },
+        {
+          "station": "Wanshouxigong",
+          "RMSE": 49.200374603271484,
+          "MAE": 26.40318489074707,
+          "MAPE": 56.76677703857422
+        },
+        {
+          "station": "Nongzhanguan",
+          "RMSE": 47.4163703918457,
+          "MAE": 25.925905227661133,
+          "MAPE": 55.820369720458984
+        }
+      ],
+      "trainable_params": 113923
+    },
+    {
+      "checkpoint": "models/checkpoints/transformer/graph_transformer_gat_v1_residual_pertstep_T4_best.pt",
+      "file_name": "graph_transformer_gat_v1_residual_pertstep_T4_best.pt",
+      "architecture_name": "graph_transformer_gat_v1_residual_pertstep",
+      "epoch": 41,
+      "val_loss": 0.002192347126467873,
+      "val_mae": 18.835180282592773,
+      "device_used": "cpu",
+      "input_dim": 33,
+      "used_feature_cols": [
+        "pm2.5",
+        "pm10",
+        "so2",
+        "no2",
+        "co",
+        "o3",
+        "temp",
+        "pres",
+        "dewp",
+        "rain",
+        "wspm",
+        "hour_sin",
+        "hour_cos",
+        "month_sin",
+        "month_cos",
+        "weekday_sin",
+        "weekday_cos",
+        "wd_E",
+        "wd_ENE",
+        "wd_ESE",
+        "wd_N",
+        "wd_NE",
+        "wd_NNE",
+        "wd_NNW",
+        "wd_NW",
+        "wd_S",
+        "wd_SE",
+        "wd_SSE",
+        "wd_SSW",
+        "wd_SW",
+        "wd_W",
+        "wd_WNW",
+        "wd_WSW"
+      ],
+      "config": {
+        "model_type": "graph_transformer",
+        "graph_conv": "gat",
+        "gat_version": "v1",
+        "num_tf_layers": 2,
+        "ffn_dim": 128,
+        "num_gat_layers": 1,
+        "use_direct_decoding": true,
+        "use_wind_adjacency": true,
+        "use_learnable_alpha_gate": true,
+        "use_learnable_sigma": false,
+        "use_node_embeddings": true,
+        "use_temporal_attention_head": false,
+        "use_post_temporal_gat": false,
+        "use_t24_residual": false,
+        "use_horizon_residual_weights": false,
+        "use_learnable_static_adj": false,
+        "use_multitask": false,
+        "use_station_horizon_bias": false,
+        "use_regime_conditioning": false,
+        "use_future_met": false,
+        "met_forecast_mode": "oracle",
+        "wind_direction_method": "circular",
+        "wind_temporal_graphs": 1,
+        "wind_temporal_graph_window": null,
+        "use_pm25_delta": false,
+        "use_holiday_feature": false,
+        "use_persistence_residual": true,
+        "use_per_station_norm": false,
+        "residual_window": 1,
+        "use_trend_residual": false,
+        "use_revin": false,
+        "target_feature_idx": 0,
+        "use_log_transform": false,
+        "loss_type": "evt_hybrid"
+      },
+      "load_info": {
+        "missing_keys": [],
+        "unexpected_keys": [],
+        "partial_load": false
+      },
+      "learned_wind_alpha": 0.4993510842323303,
+      "learned_distance_sigma": null,
+      "is_original_scale": true,
+      "overall": {
+        "RMSE": 43.77093505859375,
+        "MAE": 23.607507705688477,
+        "MAPE": 56.49887466430664,
+        "R2": 0.7758315801620483,
+        "horizon_mae": [
+          11.307670593261719,
+          17.718297958374023,
+          22.534622192382812,
+          26.60861587524414,
+          30.165260314941406,
+          33.31057357788086
+        ]
+      },
+      "horizon_metrics": [
+        {
+          "horizon": 1,
+          "RMSE": 21.046356201171875,
+          "MAE": 11.307670593261719,
+          "MAPE": 25.657146453857422
+        },
+        {
+          "horizon": 2,
+          "RMSE": 32.52129364013672,
+          "MAE": 17.718297958374023,
+          "MAPE": 40.125370025634766
+        },
+        {
+          "horizon": 3,
+          "RMSE": 40.61812210083008,
+          "MAE": 22.534622192382812,
+          "MAPE": 52.145259857177734
+        },
+        {
+          "horizon": 4,
+          "RMSE": 47.20409393310547,
+          "MAE": 26.60861587524414,
+          "MAPE": 63.37150192260742
+        },
+        {
+          "horizon": 5,
+          "RMSE": 52.79917907714844,
+          "MAE": 30.165260314941406,
+          "MAPE": 73.90255737304688
+        },
+        {
+          "horizon": 6,
+          "RMSE": 57.697261810302734,
+          "MAE": 33.31057357788086,
+          "MAPE": 83.79138946533203
+        }
+      ],
+      "station_metrics_best3": [
+        {
+          "station": "Dingling",
+          "RMSE": 34.62462615966797,
+          "MAE": 18.24540138244629,
+          "MAPE": 54.27039337158203
+        },
+        {
+          "station": "Huairou",
+          "RMSE": 35.940738677978516,
+          "MAE": 19.00171661376953,
+          "MAPE": 52.47371292114258
+        },
+        {
+          "station": "Changping",
+          "RMSE": 38.42263412475586,
+          "MAE": 20.74582862854004,
+          "MAPE": 56.83552169799805
+        }
+      ],
+      "station_metrics_worst3": [
+        {
+          "station": "Dongsi",
+          "RMSE": 49.5229377746582,
+          "MAE": 26.84720230102539,
+          "MAPE": 57.18540954589844
+        },
+        {
+          "station": "Wanshouxigong",
+          "RMSE": 48.985443115234375,
+          "MAE": 26.383880615234375,
+          "MAPE": 58.041412353515625
+        },
+        {
+          "station": "Nongzhanguan",
+          "RMSE": 47.20320129394531,
+          "MAE": 25.910205841064453,
+          "MAPE": 57.311946868896484
+        }
+      ],
+      "trainable_params": 80322
+    },
+    {
+      "checkpoint": "models/checkpoints/transformer/graph_transformer_gat_v1_residual_plume_T4_best.pt",
+      "file_name": "graph_transformer_gat_v1_residual_plume_T4_best.pt",
+      "architecture_name": "graph_transformer_gat_v1_residual_plume",
+      "epoch": 41,
+      "val_loss": 0.0021883070038077705,
+      "val_mae": 18.905275344848633,
+      "device_used": "cpu",
+      "input_dim": 33,
+      "used_feature_cols": [
+        "pm2.5",
+        "pm10",
+        "so2",
+        "no2",
+        "co",
+        "o3",
+        "temp",
+        "pres",
+        "dewp",
+        "rain",
+        "wspm",
+        "hour_sin",
+        "hour_cos",
+        "month_sin",
+        "month_cos",
+        "weekday_sin",
+        "weekday_cos",
+        "wd_E",
+        "wd_ENE",
+        "wd_ESE",
+        "wd_N",
+        "wd_NE",
+        "wd_NNE",
+        "wd_NNW",
+        "wd_NW",
+        "wd_S",
+        "wd_SE",
+        "wd_SSE",
+        "wd_SSW",
+        "wd_SW",
+        "wd_W",
+        "wd_WNW",
+        "wd_WSW"
+      ],
+      "config": {
+        "model_type": "graph_transformer",
+        "graph_conv": "gat",
+        "gat_version": "v1",
+        "num_tf_layers": 2,
+        "ffn_dim": 128,
+        "num_gat_layers": 1,
+        "use_direct_decoding": true,
+        "use_wind_adjacency": true,
+        "use_learnable_alpha_gate": true,
+        "use_learnable_sigma": false,
+        "use_node_embeddings": true,
+        "use_temporal_attention_head": false,
+        "use_post_temporal_gat": false,
+        "use_t24_residual": false,
+        "use_horizon_residual_weights": false,
+        "use_learnable_static_adj": false,
+        "use_multitask": false,
+        "use_station_horizon_bias": false,
+        "use_regime_conditioning": false,
+        "use_future_met": false,
+        "met_forecast_mode": "oracle",
+        "wind_direction_method": "circular",
+        "wind_temporal_graphs": 1,
+        "wind_temporal_graph_window": null,
+        "use_pm25_delta": false,
+        "use_holiday_feature": false,
+        "use_persistence_residual": true,
+        "use_per_station_norm": false,
+        "residual_window": 1,
+        "use_trend_residual": false,
+        "use_revin": false,
+        "target_feature_idx": 0,
+        "use_log_transform": false,
+        "loss_type": "evt_hybrid"
+      },
+      "load_info": {
+        "missing_keys": [],
+        "unexpected_keys": [],
+        "partial_load": false
+      },
+      "learned_wind_alpha": 0.5028939843177795,
+      "learned_distance_sigma": null,
+      "is_original_scale": true,
+      "overall": {
+        "RMSE": 43.808189392089844,
+        "MAE": 23.576072692871094,
+        "MAPE": 55.83125305175781,
+        "R2": 0.775449812412262,
+        "horizon_mae": [
+          11.2796049118042,
+          17.653554916381836,
+          22.48177146911621,
+          26.575849533081055,
+          30.150222778320312,
+          33.31543731689453
+        ]
+      },
+      "horizon_metrics": [
+        {
+          "horizon": 1,
+          "RMSE": 21.060134887695312,
+          "MAE": 11.2796049118042,
+          "MAPE": 25.28423309326172
+        },
+        {
+          "horizon": 2,
+          "RMSE": 32.531951904296875,
+          "MAE": 17.653554916381836,
+          "MAPE": 39.45603561401367
+        },
+        {
+          "horizon": 3,
+          "RMSE": 40.64387893676758,
+          "MAE": 22.48177146911621,
+          "MAPE": 51.3896598815918
+        },
+        {
+          "horizon": 4,
+          "RMSE": 47.242183685302734,
+          "MAE": 26.575849533081055,
+          "MAPE": 62.618106842041016
+        },
+        {
+          "horizon": 5,
+          "RMSE": 52.850341796875,
+          "MAE": 30.150222778320312,
+          "MAPE": 73.16265869140625
+        },
+        {
+          "horizon": 6,
+          "RMSE": 57.75967788696289,
+          "MAE": 33.31543731689453,
+          "MAPE": 83.07685852050781
+        }
+      ],
+      "station_metrics_best3": [
+        {
+          "station": "Dingling",
+          "RMSE": 34.631507873535156,
+          "MAE": 18.156713485717773,
+          "MAPE": 53.37730026245117
+        },
+        {
+          "station": "Huairou",
+          "RMSE": 35.9781379699707,
+          "MAE": 18.92569923400879,
+          "MAPE": 51.603126525878906
+        },
+        {
+          "station": "Changping",
+          "RMSE": 38.440731048583984,
+          "MAE": 20.68549156188965,
+          "MAPE": 56.043880462646484
+        }
+      ],
+      "station_metrics_worst3": [
+        {
+          "station": "Dongsi",
+          "RMSE": 49.55586624145508,
+          "MAE": 26.81992530822754,
+          "MAPE": 56.59682846069336
+        },
+        {
+          "station": "Wanshouxigong",
+          "RMSE": 49.03068161010742,
+          "MAE": 26.380434036254883,
+          "MAPE": 57.46986389160156
+        },
+        {
+          "station": "Nongzhanguan",
+          "RMSE": 47.250972747802734,
+          "MAE": 25.895610809326172,
+          "MAPE": 56.731956481933594
+        }
+      ],
+      "trainable_params": 80322
+    },
+    {
+      "checkpoint": "models/checkpoints/transformer/graph_transformer_gat_v1_residual_transport_T4_best.pt",
+      "file_name": "graph_transformer_gat_v1_residual_transport_T4_best.pt",
+      "architecture_name": "graph_transformer_gat_v1_residual_transport",
+      "epoch": 41,
+      "val_loss": 0.0021918319726837304,
+      "val_mae": 18.83417510986328,
+      "device_used": "cpu",
+      "input_dim": 33,
+      "used_feature_cols": [
+        "pm2.5",
+        "pm10",
+        "so2",
+        "no2",
+        "co",
+        "o3",
+        "temp",
+        "pres",
+        "dewp",
+        "rain",
+        "wspm",
+        "hour_sin",
+        "hour_cos",
+        "month_sin",
+        "month_cos",
+        "weekday_sin",
+        "weekday_cos",
+        "wd_E",
+        "wd_ENE",
+        "wd_ESE",
+        "wd_N",
+        "wd_NE",
+        "wd_NNE",
+        "wd_NNW",
+        "wd_NW",
+        "wd_S",
+        "wd_SE",
+        "wd_SSE",
+        "wd_SSW",
+        "wd_SW",
+        "wd_W",
+        "wd_WNW",
+        "wd_WSW"
+      ],
+      "config": {
+        "model_type": "graph_transformer",
+        "graph_conv": "gat",
+        "gat_version": "v1",
+        "num_tf_layers": 2,
+        "ffn_dim": 128,
+        "num_gat_layers": 1,
+        "use_direct_decoding": true,
+        "use_wind_adjacency": true,
+        "use_learnable_alpha_gate": true,
+        "use_learnable_sigma": false,
+        "use_node_embeddings": true,
+        "use_temporal_attention_head": false,
+        "use_post_temporal_gat": false,
+        "use_t24_residual": false,
+        "use_horizon_residual_weights": false,
+        "use_learnable_static_adj": false,
+        "use_multitask": false,
+        "use_station_horizon_bias": false,
+        "use_regime_conditioning": false,
+        "use_future_met": false,
+        "met_forecast_mode": "oracle",
+        "wind_direction_method": "circular",
+        "wind_temporal_graphs": 1,
+        "wind_temporal_graph_window": null,
+        "use_pm25_delta": false,
+        "use_holiday_feature": false,
+        "use_persistence_residual": true,
+        "use_per_station_norm": false,
+        "residual_window": 1,
+        "use_trend_residual": false,
+        "use_revin": false,
+        "target_feature_idx": 0,
+        "use_log_transform": false,
+        "loss_type": "evt_hybrid"
+      },
+      "load_info": {
+        "missing_keys": [],
+        "unexpected_keys": [],
+        "partial_load": false
+      },
+      "learned_wind_alpha": 0.4997155964374542,
+      "learned_distance_sigma": null,
+      "is_original_scale": true,
+      "overall": {
+        "RMSE": 43.771751403808594,
+        "MAE": 23.60763931274414,
+        "MAPE": 56.494598388671875,
+        "R2": 0.7758232355117798,
+        "horizon_mae": [
+          11.308168411254883,
+          17.718761444091797,
+          22.534631729125977,
+          26.608503341674805,
+          30.165178298950195,
+          33.31060028076172
+        ]
+      },
+      "horizon_metrics": [
+        {
+          "horizon": 1,
+          "RMSE": 21.046171188354492,
+          "MAE": 11.308168411254883,
+          "MAPE": 25.660839080810547
+        },
+        {
+          "horizon": 2,
+          "RMSE": 32.5213737487793,
+          "MAE": 17.718761444091797,
+          "MAPE": 40.12565231323242
+        },
+        {
+          "horizon": 3,
+          "RMSE": 40.61854553222656,
+          "MAE": 22.534631729125977,
+          "MAPE": 52.140838623046875
+        },
+        {
+          "horizon": 4,
+          "RMSE": 47.20502471923828,
+          "MAE": 26.608503341674805,
+          "MAPE": 63.364646911621094
+        },
+        {
+          "horizon": 5,
+          "RMSE": 52.80046463012695,
+          "MAE": 30.165178298950195,
+          "MAPE": 73.89388275146484
+        },
+        {
+          "horizon": 6,
+          "RMSE": 57.698753356933594,
+          "MAE": 33.31060028076172,
+          "MAPE": 83.78172302246094
+        }
+      ],
+      "station_metrics_best3": [
+        {
+          "station": "Dingling",
+          "RMSE": 34.624671936035156,
+          "MAE": 18.244882583618164,
+          "MAPE": 54.262672424316406
+        },
+        {
+          "station": "Huairou",
+          "RMSE": 35.94133758544922,
+          "MAE": 19.00197982788086,
+          "MAPE": 52.471954345703125
+        },
+        {
+          "station": "Changping",
+          "RMSE": 38.423133850097656,
+          "MAE": 20.74578285217285,
+          "MAPE": 56.833152770996094
+        }
+      ],
+      "station_metrics_worst3": [
+        {
+          "station": "Dongsi",
+          "RMSE": 49.523983001708984,
+          "MAE": 26.847471237182617,
+          "MAPE": 57.18014907836914
+        },
+        {
+          "station": "Wanshouxigong",
+          "RMSE": 48.986289978027344,
+          "MAE": 26.384248733520508,
+          "MAPE": 58.03899002075195
+        },
+        {
+          "station": "Nongzhanguan",
+          "RMSE": 47.20437240600586,
+          "MAE": 25.910415649414062,
+          "MAPE": 57.30730438232422
+        }
+      ],
+      "trainable_params": 80322
+    }
+  ],
+  "failures": []
+}

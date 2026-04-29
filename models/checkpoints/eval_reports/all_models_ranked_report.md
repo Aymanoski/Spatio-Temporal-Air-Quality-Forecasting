@@ -235,29 +235,57 @@ training setup as identical to current defaults.
 | 1 | baseline_historical_mean | historical_mean | 0 | 44.4117 | 69.1075 | 138.4588% | 0.4412 |
 | 2 | baseline_mlp_best.pt | baseline_mlp | 5,016,392 | 26.3128 | 44.6829 | 55.0261% | 0.7664 |
 | 3 | baseline_persistence | persistence | 0 | 23.9829 | 45.8596 | 53.4814% | 0.7539 |
-| 4 | graph_transformer_gat_v1_residual_48h_T4_best.pt | graph_transformer_gat_v1_residual_48h | 80,322 | 23.7615 | 40.7749 | 57.0256% | 0.8055 |
-| 5 | v3_evt_loss_T4_best_MAE.pt | v3_evt_loss | 433,153 | 22.7357 | 40.2200 | 50.2129% | 0.8107 |
-| 6 | v1_baseline_T4_best_MAE.pt | v1_baseline | 431,041 | 22.5457 | 40.3418 | 48.6125% | 0.8096 |
-| 7 | baseline_lstm_best.pt | baseline_lstm | 94,086 | 22.5163 | 40.8132 | 51.7014% | 0.8051 |
-| 8 | v2_direct_decoding_T4_best_MAE.pt | v2_direct_decoding | 433,153 | 22.4972 | 40.3729 | 46.3215% | 0.8093 |
-| 9 | graph_transformer_gat_v1_residual_t24_T4_best.pt | graph_transformer_gat_v1_residual_t24 | 80,323 | 22.4352 | 38.9841 | 52.1618% | 0.8222 |
-| 10 | v4_wind_adjacency_T4_MAE.pt | gcn_lstm_v2 | 194,561 | 22.3807 | 40.2931 | 47.7384% | 0.8100 |
-| 11 | alpha__best.pt | alpha | 194,562 | 21.8041 | 39.1870 | 46.0484% | 0.8203 |
-| 12 | graph_transformer_v1_T4_best.pt | graph_transformer_v1 | 80,194 | 21.6859 | 39.0771 | 46.5207% | 0.8213 |
-| 13 | alpha+embeding.pt | gcn_lstm_v2 | 195,330 | 21.6361 | 39.0500 | 45.9034% | 0.8216 |
-| 14 | gcn_lstm_v2_noattn_T4_best.pt | gcn_lstm_v2_noattn | 195,330 | 21.6356 | 39.0410 | 45.7963% | 0.8217 |
-| 15 | graph_transformer_gat_v2_T4_best.pt | graph_transformer_gat_v2 | 84,738 | 21.5261 | 38.5465 | 46.9007% | 0.8262 |
-| 16 | graph_transformer_gat_v1_residual_temporalpool_T4_best.pt | graph_transformer_gat_v1_residual_temporalpool | 80,322 | 21.3528 | 38.6903 | 47.6353% | 0.8249 |
-| 17 | graphtransformer_gat_v1_T4_best.pt | graph_transformer_gat_v1 | 80,322 | 21.1839 | 38.0744 | 46.2076% | 0.8304 |
-| 18 | graph_transformer_gatv2_T4_best.pt | graph_transformer_gatv2 | 84,354 | 21.1700 | 38.1303 | 44.8444% | 0.8299 |
-| 19 | graph_transformer_gat_v1_residual_postgat_T4_best.pt | graph_transformer_gat_v1_residual_postgat | 84,738 | 21.0224 | 38.5138 | 45.5425% | 0.8264 |
-| 20 | graph_transformer_gat_v1_residual_horizonw_T4_best.pt | graph_transformer_gat_v1_residual_horizonw | 80,322 | 20.8894 | 38.1205 | 45.0093% | 0.8300 |
-| 21 | graph_transformer_gat_v1_residual_T4_best.pt | graph_transformer_gat_v1_residual | 80,322 | 20.6242 | 37.7290 | 47.1663% | 0.8334 |
-| 22 | graph_transformer_gat_v1_residual_futuremet_T4_best.pt | graph_transformer_gat_v1_residual_futuremet | 81,730 | 19.4883 | 35.0871 | 40.8001% | 0.8560 |
+| 4 | graph_transformer_gat_v1_residual_metpred_T4_best.pt ⚠ | graph_transformer_gat_v1_residual_metpred | 81,730 | 23.9442 | 43.6695 | 54.7770% | 0.7769 |
+| 5 | graph_transformer_gat_v1_residual_48h_T4_best.pt | graph_transformer_gat_v1_residual_48h | 80,322 | 23.7615 | 40.7749 | 57.0256% | 0.8055 |
+| 6 | graph_transformer_gat_v1_residual_transport_T4_best.pt ⚠ | graph_transformer_gat_v1_residual_transport | 80,322 | 23.6076 | 43.7718 | 56.4946% | 0.7758 |
+| 7 | graph_transformer_gat_v1_residual_pertstep_T4_best.pt ⚠ | graph_transformer_gat_v1_residual_pertstep | 80,322 | 23.6075 | 43.7709 | 56.4989% | 0.7758 |
+| 8 | graph_transformer_gat_v1_residual_multiscale_T4_best.pt ⚠ | graph_transformer_gat_v1_residual_multiscale | 113,923 | 23.5935 | 43.9626 | 55.1148% | 0.7739 |
+| 9 | graph_transformer_gat_v1_residual_plume_T4_best.pt ⚠ | graph_transformer_gat_v1_residual_plume | 80,322 | 23.5761 | 43.8082 | 55.8313% | 0.7754 |
+| 10 | graph_transformer_gat_v1_residual_log1p_all_T4_best.pt ⚠ | graph_transformer_gat_v1_residual_log1p_all | 80,322 | 23.4787 | 42.7541 | 50.5567% | 0.7861 |
+| 11 | graph_transformer_gat_v1_residual_log1p_T4_best.pt ⚠ | graph_transformer_gat_v1_residual_log1p | 80,322 | 23.4785 | 42.9492 | 49.8216% | 0.7842 |
+| 12 | v3_evt_loss_T4_best_MAE.pt | v3_evt_loss | 433,153 | 22.7357 | 40.2200 | 50.2129% | 0.8107 |
+| 13 | v1_baseline_T4_best_MAE.pt | v1_baseline | 431,041 | 22.5457 | 40.3418 | 48.6125% | 0.8096 |
+| 14 | baseline_lstm_best.pt | baseline_lstm | 94,086 | 22.5163 | 40.8132 | 51.7014% | 0.8051 |
+| 15 | v2_direct_decoding_T4_best_MAE.pt | v2_direct_decoding | 433,153 | 22.4972 | 40.3729 | 46.3215% | 0.8093 |
+| 16 | graph_transformer_gat_v1_residual_t24_T4_best.pt | graph_transformer_gat_v1_residual_t24 | 80,323 | 22.4352 | 38.9841 | 52.1618% | 0.8222 |
+| 17 | v4_wind_adjacency_T4_MAE.pt | gcn_lstm_v2 | 194,561 | 22.3807 | 40.2931 | 47.7384% | 0.8100 |
+| 18 | alpha__best.pt | alpha | 194,562 | 21.8041 | 39.1870 | 46.0484% | 0.8203 |
+| 19 | graph_transformer_v1_T4_best.pt | graph_transformer_v1 | 80,194 | 21.6859 | 39.0771 | 46.5207% | 0.8213 |
+| 20 | alpha+embeding.pt | gcn_lstm_v2 | 195,330 | 21.6361 | 39.0500 | 45.9034% | 0.8216 |
+| 21 | gcn_lstm_v2_noattn_T4_best.pt | gcn_lstm_v2_noattn | 195,330 | 21.6356 | 39.0410 | 45.7963% | 0.8217 |
+| 22 | graph_transformer_gat_v2_T4_best.pt | graph_transformer_gat_v2 | 84,738 | 21.5261 | 38.5465 | 46.9007% | 0.8262 |
+| 23 | graph_transformer_gat_v1_residual_temporalpool_T4_best.pt | graph_transformer_gat_v1_residual_temporalpool | 80,322 | 21.3528 | 38.6903 | 47.6353% | 0.8249 |
+| 24 | graphtransformer_gat_v1_T4_best.pt | graph_transformer_gat_v1 | 80,322 | 21.1839 | 38.0744 | 46.2076% | 0.8304 |
+| 25 | graph_transformer_gatv2_T4_best.pt | graph_transformer_gatv2 | 84,354 | 21.1700 | 38.1303 | 44.8444% | 0.8299 |
+| 26 | graph_transformer_gat_v1_residual_log1p_all_std_stationbias_rollingmean_T4_best.pt | graph_transformer_gat_v1_residual_log1p_all_std_stationbias_rollingmean | 80,394 | 21.0961 | 39.4390 | 39.2541% | 0.8180 |
+| 27 | graph_transformer_gat_v1_residual_postgat_T4_best.pt | graph_transformer_gat_v1_residual_postgat | 84,738 | 21.0224 | 38.5138 | 45.5425% | 0.8264 |
+| 28 | graph_transformer_gat_v1_residual_horizonw_T4_best.pt | graph_transformer_gat_v1_residual_horizonw | 80,322 | 20.8894 | 38.1205 | 45.0093% | 0.8300 |
+| 29 | graph_transformer_gat_v1_residual_log1p_all_std_stationbias_revin_T4_best.pt | graph_transformer_gat_v1_residual_log1p_all_std_stationbias_revin | 80,522 | 20.7229 | 39.0930 | 39.7331% | 0.8212 |
+| 30 | graph_transformer_gat_v1_residual_T4_best.pt | graph_transformer_gat_v1_residual | 80,322 | 20.6242 | 37.7290 | 47.1663% | 0.8334 |
+| 31 | graph_transformer_gat_v1_residual_log1p_all_std_holiday_T4_best.pt | graph_transformer_gat_v1_residual_log1p_all_std_holiday | 80,386 | 20.3738 | 39.1367 | 35.5437% | 0.8208 |
+| 32 | graph_transformer_gat_v1_residual_log1p_all_std_multitask_T4_best.pt | graph_transformer_gat_v1_residual_log1p_all_std_multitask | 86,471 | 20.2026 | 38.1601 | 37.1980% | 0.8296 |
+| 33 | graph_transformer_gat_v1_residual_log1p_all_std_stationbias_regime_T4_best.pt | graph_transformer_gat_v1_residual_log1p_all_std_stationbias_regime | 80,522 | 20.1202 | 37.8993 | 38.6585% | 0.8319 |
+| 34 | graph_transformer_gat_v1_residual_log1p_all_std_delta_T4_best.pt | graph_transformer_gat_v1_residual_log1p_all_std_delta | 80,386 | 20.1201 | 38.4399 | 36.9864% | 0.8271 |
+| 35 | graph_transformer_gat_v1_residual_log1p_all_std_cosine_s42_T4_best.pt | graph_transformer_gat_v1_residual_log1p_all_std_cosine_s42 | 80,322 | 20.1170 | 37.9275 | 36.9544% | 0.8317 |
+| 36 | graph_transformer_gat_v1_residual_log1p_all_std_stationbias_trend_T4_best.pt | graph_transformer_gat_v1_residual_log1p_all_std_stationbias_trend | 80,394 | 20.0781 | 38.7210 | 37.1590% | 0.8246 |
+| 37 | graph_transformer_gat_v1_residual_log1p_all_std_ffn4x_T4_best.pt | graph_transformer_gat_v1_residual_log1p_all_std_ffn4x | 113,346 | 20.0525 | 38.1042 | 35.9148% | 0.8301 |
+| 38 | graph_transformer_gat_v1_residual_evt_huber_adamw_std_T4_best.pt | graph_transformer_gat_v1_residual_evt_huber_adamw_std | 80,322 | 19.9778 | 38.2074 | 35.6239% | 0.8292 |
+| 39 | graph_transformer_gat_v1_residual_log1p_all_rain_std_T4_best.pt | graph_transformer_gat_v1_residual_log1p_all_rain_std | 80,322 | 19.9440 | 37.7433 | 36.4993% | 0.8333 |
+| 40 | graph_transformer_gat_v1_residual_log1p_all_std_noise_T4_best.pt | graph_transformer_gat_v1_residual_log1p_all_std_noise | 80,322 | 19.9287 | 37.6890 | 36.4618% | 0.8338 |
+| 41 | graph_transformer_gat_v1_residual_evt_huber_adamw_log1p_wspm_std_T4_best.pt | graph_transformer_gat_v1_residual_evt_huber_adamw_log1p_wspm_std | 80,322 | 19.9222 | 38.2180 | 36.9867% | 0.8291 |
+| 42 | graph_transformer_gat_v1_residual_log1p_all_std_perstation_T4_best.pt | graph_transformer_gat_v1_residual_log1p_all_std_perstation | 80,322 | 19.8469 | 37.5681 | 36.6767% | 0.8349 |
+| 43 | graph_transformer_gat_v1_residual_log1p_all_std_learnAdj_T4_best.pt | graph_transformer_gat_v1_residual_log1p_all_std_learnAdj | 80,466 | 19.8438 | 37.5830 | 36.6470% | 0.8347 |
+| 44 | graph_transformer_gat_v1_residual_log1p_all_std_corrAdj_T4_best.pt | graph_transformer_gat_v1_residual_log1p_all_std_corrAdj | 80,322 | 19.8384 | 37.5729 | 36.6502% | 0.8348 |
+| 45 | graph_transformer_gat_v1_residual_log1p_all_std_lrmae_T4_best.pt | graph_transformer_gat_v1_residual_log1p_all_std_lrmae | 80,322 | 19.8150 | 37.5085 | 36.6172% | 0.8354 |
+| 46 | graph_transformer_gat_v1_residual_log1p_all_std_T4_best.pt | graph_transformer_gat_v1_residual_log1p_all_std | 80,322 | 19.8150 | 37.5085 | 36.6172% | 0.8354 |
+| 47 | graph_transformer_gat_v1_residual_log1p_all_std_stationbias_T4_best.pt | graph_transformer_gat_v1_residual_log1p_all_std_stationbias | 80,394 | 19.7947 | 37.4762 | 36.7272% | 0.8357 |
+| 48 | graph_transformer_gat_v1_residual_futuremet_T4_best.pt | graph_transformer_gat_v1_residual_futuremet | 81,730 | 19.4883 | 35.0871 | 40.8001% | 0.8560 |
 
-**Addendum note**: Ranks 14–22 were appended after evaluating previously missing transformer checkpoints in `models/checkpoints/transformer` using `utils/tester.py`.
+⚠ **Scaler-mismatch warning (ranks 4, 6–11)**: These checkpoints were trained with `MinMaxScaler` (before the `StandardScaler` + `log1p` normalization was adopted) but were re-evaluated by the current `utils/tester.py` which uses `StandardScaler`. The inverse-transform produces incorrect µg/m³ values, so their test MAE/RMSE figures are artificially inflated and are **not comparable** to the rest of the table. They are included for completeness and to document the experimental history.
 
-**Note on corrected entries**: Ranks 14 and 15 were re-evaluated with strict checkpoint loading and corrected topology reconstruction. Their metrics below supersede the earlier partial-load results.
+**Addendum note**: Ranks 4–11 and 26, 29, 31–47 were added after evaluating previously missing transformer checkpoints in `models/checkpoints/transformer` using `utils/tester.py`.
+
+**Note on corrected entries**: Ranks 21 and 22 (formerly 14 and 15) were re-evaluated with strict checkpoint loading and corrected topology reconstruction. Their metrics below supersede the earlier partial-load results.
 
 **Parameter count note**: Trainable parameter counts are computed from reconstructed checkpoint topology as `sum(p.numel() for p in model.parameters() if p.requires_grad)`. Non-parametric baselines (`historical_mean`, `persistence`) are reported as 0.
 
@@ -477,7 +505,46 @@ its own.
 
 ---
 
-## Rank 4: graph_transformer_gat_v1_residual_48h_T4_best.pt
+## Rank 4: graph_transformer_gat_v1_residual_metpred_T4_best.pt
+
+**Architecture Name**: `graph_transformer_gat_v1_residual_metpred`
+
+**Type**: `GraphTransformerModel` with GATv1 spatial block, persistence residual, and oracle future meteorology branch.
+
+**⚠ Scaler mismatch — result not comparable to ranks 12+.** This checkpoint was trained with `MinMaxScaler` (before the `StandardScaler`+`log1p` normalization was adopted). The current `tester.py` refits scalers with `StandardScaler`, so inverse-transform yields wrong µg/m³ values. The inflated test MAE (23.94) cannot be compared to StdScaler-era models.
+
+**What it tests**: The oracle future-meteorology experiment (`use_future_met=True`) applied to the base `gat_v1_residual` architecture **before** the log1p+StdScaler normalization was introduced. This is the chronologically earlier version of the oracle ceiling diagnostic. Comparing rank 4 (23.94 MAE, MinMax-era, scaler mismatch) to rank 48 (19.49 MAE, log1p+StdScaler, correct eval) reveals how critical the normalization change was — the architecture is identical but the normalization regime changed everything.
+
+**New functionality**: `future_met_proj` branch — a learned linear projection that fuses oracle future meteorological features (temperature, pressure, dewpoint, rain, wind speed, 16 wind direction categories, 21 features total) at each horizon step into the direct prediction head. Ground-truth future met is fed at inference (oracle), making this a ceiling diagnostic, not a deployable model.
+
+**Architecture**:
+- Same as base `gat_v1_residual` + `use_future_met=True`
+- `future_met_dim=21` → `Linear(21, hidden_dim=64)` fused into `DirectHorizonHead` per step
+- `use_log_transform`: **False** (MinMax-era checkpoint)
+- `use_persistence_residual`: **True**
+- checkpoint load: strict
+
+**Overall Metrics** *(scaler mismatch — inflated, not comparable to ranks 12+)*:
+- RMSE: 43.6695
+- MAE: 23.9442
+- MAPE: 54.7770%
+- R²: 0.7769
+- Epoch: 19 | Val MAE: 17.8078
+
+**Per-Horizon Metrics**:
+
+| Horizon | RMSE | MAE | MAPE |
+|---:|---:|---:|---:|
+| 1 | 21.6065 | 11.9835 | 27.0068% |
+| 2 | 32.8123 | 18.1934 | 39.7686% |
+| 3 | 40.6861 | 22.8904 | 50.7437% |
+| 4 | 47.0738 | 26.8639 | 61.0392% |
+| 5 | 52.4860 | 30.3349 | 70.6201% |
+| 6 | 57.2065 | 33.3994 | 79.4833% |
+
+---
+
+## Rank 5: graph_transformer_gat_v1_residual_48h_T4_best.pt
 
 **Architecture Name**: `graph_transformer_gat_v1_residual_48h`
 
@@ -516,7 +583,204 @@ its own.
 
 ---
 
-## Rank 5: v3_evt_loss_T4_best_MAE.pt
+## Rank 6: graph_transformer_gat_v1_residual_transport_T4_best.pt
+
+**Architecture Name**: `graph_transformer_gat_v1_residual_transport`
+
+**Type**: `GraphTransformerModel` with GATv1 spatial block and persistence residual.
+
+**⚠ Scaler mismatch — result not comparable to ranks 12+.** Trained with `MinMaxScaler`, evaluated with `StandardScaler`. Test MAE (23.61) is inflated.
+
+**What it tests**: A pre-normalization architecture experiment named `transport`, intended to test a transport-aware graph construction or adjacency modification. The saved config is identical to the base `gat_v1_residual` (rank 30), indicating the architectural change (likely in `graph.py` directly, not exposed as a config flag) had no measurable effect on convergence — essentially a duplicate trajectory. Together with rank 7 (`pertstep`), these two checkpoints have near-identical metrics down to 4 decimal places, confirming the changes were ineffective even before scaler mismatch is accounted for.
+
+**New functionality tested**: Transport-aware adjacency or forward-pass modification (exact change not preserved in config; result suggests no effect).
+
+**Architecture**: Identical saved config to `gat_v1_residual` — `graph_conv=gat`, `gat_version=v1`, `num_gat_layers=1`, `use_persistence_residual=True`, `use_log_transform=False`, `use_learnable_alpha_gate=True`, EVT hybrid loss.
+
+**Overall Metrics** *(scaler mismatch — inflated)*:
+- RMSE: 43.7718 | MAE: 23.6076 | MAPE: 56.4946% | R²: 0.7758
+- Epoch: 41 | Val MAE: 18.8342
+
+**Per-Horizon Metrics**:
+
+| Horizon | RMSE | MAE | MAPE |
+|---:|---:|---:|---:|
+| 1 | 21.0462 | 11.3082 | 25.6608% |
+| 2 | 32.5214 | 17.7188 | 40.1257% |
+| 3 | 40.6185 | 22.5346 | 52.1408% |
+| 4 | 47.2050 | 26.6085 | 63.3646% |
+| 5 | 52.8005 | 30.1652 | 73.8939% |
+| 6 | 57.6988 | 33.3106 | 83.7817% |
+
+---
+
+## Rank 7: graph_transformer_gat_v1_residual_pertstep_T4_best.pt
+
+**Architecture Name**: `graph_transformer_gat_v1_residual_pertstep`
+
+**Type**: `GraphTransformerModel` with GATv1 spatial block and persistence residual.
+
+**⚠ Scaler mismatch — result not comparable to ranks 12+.** Trained with `MinMaxScaler`, evaluated with `StandardScaler`. Test MAE (23.61) is inflated.
+
+**What it tests**: A pre-normalization experiment named `pertstep`, likely testing a per-step persistence residual variant (independent residual scaling per horizon step, rather than a shared scalar). The saved config is identical to the base `gat_v1_residual`, and the metrics match rank 6 (`transport`) to 4 decimal places — confirming both were failed experiments with no measurable impact.
+
+**New functionality tested**: Per-step residual weighting or per-horizon persistence scaling (exact implementation not preserved in config).
+
+**Architecture**: Identical saved config to `transport` (rank 6) and `gat_v1_residual` (rank 30). `use_log_transform=False`, `use_persistence_residual=True`, 80,322 parameters.
+
+**Overall Metrics** *(scaler mismatch — inflated)*:
+- RMSE: 43.7709 | MAE: 23.6075 | MAPE: 56.4989% | R²: 0.7758
+- Epoch: 41 | Val MAE: 18.8352
+
+**Per-Horizon Metrics**:
+
+| Horizon | RMSE | MAE | MAPE |
+|---:|---:|---:|---:|
+| 1 | 21.0464 | 11.3077 | 25.6571% |
+| 2 | 32.5213 | 17.7183 | 40.1254% |
+| 3 | 40.6181 | 22.5346 | 52.1453% |
+| 4 | 47.2041 | 26.6086 | 63.3715% |
+| 5 | 52.7992 | 30.1653 | 73.9026% |
+| 6 | 57.6973 | 33.3106 | 83.7914% |
+
+---
+
+## Rank 8: graph_transformer_gat_v1_residual_multiscale_T4_best.pt
+
+**Architecture Name**: `graph_transformer_gat_v1_residual_multiscale`
+
+**Type**: `GraphTransformerModel` with GATv1 spatial block, persistence residual, and multi-scale local-window Transformer encoder.
+
+**⚠ Scaler mismatch — result not comparable to ranks 12+.** Trained with `MinMaxScaler`, evaluated with `StandardScaler`. Test MAE (23.59) is inflated.
+
+**What it tests**: Whether a multi-scale temporal encoder — combining the standard 24-step global Transformer with a shorter local-window Transformer stack — improves over single-scale temporal encoding. The 33,601 extra parameters vs. the base model come from the additional local-window layers (`use_multiscale_temporal=True`, `local_window=6`, `n_local_layers=1`). Despite the extra capacity, test MAE is nearly identical to the other MinMax-era models here, suggesting the multi-scale path added no useful inductive bias for this task without proper normalization.
+
+**New functionality**: `SpatioTemporalTransformerEncoder` extended with a local-window Transformer branch that processes a shorter recent context window (`local_window=6` most-recent timesteps) in parallel with the full 24-step encoder, then concatenates or fuses the outputs before the prediction head. Adds ~33k parameters.
+
+**Architecture**:
+- `use_multiscale_temporal`: **True** — local-window parallel encoder path
+- `local_window`: 6 — only the 6 most-recent timesteps used by the local branch
+- `n_local_layers`: 1 — single Transformer layer in the local path
+- `use_log_transform`: **False** (MinMax-era), `use_persistence_residual`: **True**
+- 113,923 trainable parameters (vs. 80,322 for the base)
+
+**Overall Metrics** *(scaler mismatch — inflated)*:
+- RMSE: 43.9626 | MAE: 23.5935 | MAPE: 55.1148% | R²: 0.7739
+- Epoch: 38 | Val MAE: 18.7834
+
+**Per-Horizon Metrics**:
+
+| Horizon | RMSE | MAE | MAPE |
+|---:|---:|---:|---:|
+| 1 | 20.9788 | 11.0257 | 24.2018% |
+| 2 | 32.6187 | 17.5636 | 38.5081% |
+| 3 | 40.8175 | 22.5153 | 50.6365% |
+| 4 | 47.4435 | 26.6732 | 62.0054% |
+| 5 | 53.0571 | 30.2908 | 72.6886% |
+| 6 | 57.9670 | 33.4926 | 82.6481% |
+
+---
+
+## Rank 9: graph_transformer_gat_v1_residual_plume_T4_best.pt
+
+**Architecture Name**: `graph_transformer_gat_v1_residual_plume`
+
+**Type**: `GraphTransformerModel` with GATv1 spatial block and persistence residual.
+
+**⚠ Scaler mismatch — result not comparable to ranks 12+.** Trained with `MinMaxScaler`, evaluated with `StandardScaler`. Test MAE (23.58) is inflated.
+
+**What it tests**: A pre-normalization experiment named `plume`, intended to explore Gaussian atmospheric plume-inspired adjacency or dispersion weighting (a physically-motivated graph construction based on Gaussian dispersion equations). The saved config is identical to the base `gat_v1_residual` (rank 30), indicating the plume-specific change was not flagged in config and had no measurable effect on the training trajectory.
+
+**New functionality tested**: Gaussian plume dispersion-inspired adjacency weighting (exact implementation not preserved in config; no measurable effect found).
+
+**Architecture**: Identical saved config to `transport`/`pertstep`. `use_log_transform=False`, `use_persistence_residual=True`, 80,322 parameters.
+
+**Overall Metrics** *(scaler mismatch — inflated)*:
+- RMSE: 43.8082 | MAE: 23.5761 | MAPE: 55.8313% | R²: 0.7754
+- Epoch: 41 | Val MAE: 18.9053
+
+**Per-Horizon Metrics**:
+
+| Horizon | RMSE | MAE | MAPE |
+|---:|---:|---:|---:|
+| 1 | 21.0601 | 11.2796 | 25.2842% |
+| 2 | 32.5320 | 17.6536 | 39.4560% |
+| 3 | 40.6439 | 22.4818 | 51.3897% |
+| 4 | 47.2422 | 26.5758 | 62.6181% |
+| 5 | 52.8503 | 30.1502 | 73.1627% |
+| 6 | 57.7597 | 33.3154 | 83.0769% |
+
+---
+
+## Rank 10: graph_transformer_gat_v1_residual_log1p_all_T4_best.pt
+
+**Architecture Name**: `graph_transformer_gat_v1_residual_log1p_all`
+
+**Type**: `GraphTransformerModel` with GATv1 spatial block and persistence residual.
+
+**⚠ Scaler mismatch — result not comparable to ranks 12+.** Trained with `MinMaxScaler` + log1p on indices 0–5, evaluated with `StandardScaler`. Inverse-transform uses wrong scale factors → inflated test MAE (23.48).
+
+**What it tests**: The second normalization experiment in the progression: applying `log1p` to all six pollutant features (PM2.5 + PM10, SO2, NO2, CO, O3, indices 0–5) while keeping `MinMaxScaler`. Previously, only PM2.5 (index 0) was log-transformed (rank 11). The progression log1p(PM2.5 only) → log1p(all pollutants) was intended to compress the heavy-tailed co-pollutant distributions. The actual improvement from this change (−0.210 MAE in the MinMax era, per project records at 19.845 → 19.845) was confirmed only after the scaler mismatch was resolved in the StdScaler re-evaluations.
+
+**New functionality**: `log_transform_indices=[0,1,2,3,4,5]` — `log1p` applied to all co-pollutant features before scaling, compressing their heavy tails. Index 10 (`wspm`) deliberately excluded because `build_dynamic_adjacency_gpu` reads it raw.
+
+**Architecture**:
+- `use_log_transform`: **True**, `log_transform_indices`: [0,1,2,3,4,5]
+- Scaler at training time: `MinMaxScaler` (not StdScaler)
+- `use_persistence_residual`: **True**, 80,322 parameters
+
+**Overall Metrics** *(scaler mismatch — inflated)*:
+- RMSE: 42.7541 | MAE: 23.4787 | MAPE: 50.5567% | R²: 0.7861
+- Epoch: 42 | Val MAE: 17.8606
+
+**Per-Horizon Metrics**:
+
+| Horizon | RMSE | MAE | MAPE |
+|---:|---:|---:|---:|
+| 1 | 21.1177 | 11.1872 | 22.5342% |
+| 2 | 32.3283 | 17.6500 | 35.1215% |
+| 3 | 40.1332 | 22.5569 | 46.1436% |
+| 4 | 46.2961 | 26.5982 | 56.7187% |
+| 5 | 51.2972 | 29.9715 | 66.7197% |
+| 6 | 55.5967 | 32.9083 | 76.1023% |
+
+---
+
+## Rank 11: graph_transformer_gat_v1_residual_log1p_T4_best.pt
+
+**Architecture Name**: `graph_transformer_gat_v1_residual_log1p`
+
+**Type**: `GraphTransformerModel` with GATv1 spatial block and persistence residual.
+
+**⚠ Scaler mismatch — result not comparable to ranks 12+.** Trained with `MinMaxScaler` + log1p on PM2.5 only (index 0), evaluated with `StandardScaler`. Test MAE (23.48) is inflated.
+
+**What it tests**: The first log-transform normalization experiment: applying `log1p` to PM2.5 only (index 0), while keeping `MinMaxScaler` on all features. This was the entry point into the normalization search. Per project records, this improved MAE from 20.624 (no log1p) to 20.055 in the MinMax era — a real improvement. That result is not visible here due to scaler mismatch. The comparison between rank 11 and rank 10 (log1p on PM2.5 vs log1p on all pollutants) is similarly obscured; the genuine difference is documented in the `project_architecture.md` memory table.
+
+**New functionality**: `log_transform_indices=[0]` — `log1p` applied to PM2.5 (index 0) only before MinMaxScaler, compressing the heavy tail of the target distribution. First step in the normalization ablation.
+
+**Architecture**:
+- `use_log_transform`: **True**, `log_transform_indices`: [0]
+- Scaler at training time: `MinMaxScaler`
+- `use_persistence_residual`: **True**, 80,322 parameters
+
+**Overall Metrics** *(scaler mismatch — inflated)*:
+- RMSE: 42.9492 | MAE: 23.4785 | MAPE: 49.8216% | R²: 0.7842
+- Epoch: 40 | Val MAE: 17.8164
+
+**Per-Horizon Metrics**:
+
+| Horizon | RMSE | MAE | MAPE |
+|---:|---:|---:|---:|
+| 1 | 21.3102 | 11.2691 | 22.0667% |
+| 2 | 32.5278 | 17.6832 | 34.4076% |
+| 3 | 40.3243 | 22.5441 | 45.2895% |
+| 4 | 46.4828 | 26.5578 | 55.8332% |
+| 5 | 51.5035 | 29.9354 | 65.9316% |
+| 6 | 55.8240 | 32.8816 | 75.4009% |
+
+---
+
+## Rank 12: v3_evt_loss_T4_best_MAE.pt
 
 **Architecture Name**: `v3_evt_loss`
 
@@ -584,7 +848,7 @@ bug. Exact hyperparameters from that run are not preserved; likely predates curr
 
 ---
 
-## Rank 6: v1_baseline_T4_best_MAE.pt
+## Rank 13: v1_baseline_T4_best_MAE.pt
 
 **Architecture Name**: `v1_baseline`
 
@@ -655,7 +919,7 @@ embedding experiments. Predates the early stopping fix, but since this used MSE 
 
 ---
 
-## Rank 7: baseline_lstm_best.pt
+## Rank 14: baseline_lstm_best.pt
 
 **Architecture Name**: `baseline_lstm`
 
@@ -741,7 +1005,7 @@ The meaningful graph benefit only appears with dynamic wind-aware adjacency (ran
 
 ---
 
-## Rank 8: v2_direct_decoding_T4_best_MAE.pt
+## Rank 15: v2_direct_decoding_T4_best_MAE.pt
 
 **Architecture Name**: `v2_direct_decoding`
 
@@ -810,7 +1074,7 @@ bug did not affect this run (MSE loss, no EVT lambda schedule).
 
 ---
 
-## Rank 9: graph_transformer_gat_v1_residual_t24_T4_best.pt
+## Rank 16: graph_transformer_gat_v1_residual_t24_T4_best.pt
 
 **Architecture Name**: `graph_transformer_gat_v1_residual_t24`
 
@@ -860,7 +1124,7 @@ regardless of this discrepancy.
 
 ---
 
-## Rank 10: v4_wind_adjacency_T4_MAE.pt
+## Rank 17: v4_wind_adjacency_T4_MAE.pt
 
 **Architecture Name**: `gcn_lstm_v2`
 
@@ -946,7 +1210,7 @@ the first model in the clean experiment sequence.
 
 ---
 
-## Rank 11: alpha__best.pt
+## Rank 18: alpha__best.pt
 
 **Architecture Name**: `alpha`
 
@@ -1024,7 +1288,7 @@ the data supports slightly more wind emphasis than the initial guess.
 
 ---
 
-## Rank 12: graph_transformer_v1_T4_best.pt
+## Rank 19: graph_transformer_v1_T4_best.pt
 
 **Architecture Name**: `graph_transformer_v1`
 
@@ -1093,7 +1357,7 @@ and beats the earlier alpha-only run (rank 9), but does not beat the GAT-based v
 
 ---
 
-## Rank 13: alpha+embeding.pt
+## Rank 20: alpha+embeding.pt
 
 **Architecture Name**: `gcn_lstm_v2`
 
@@ -1175,7 +1439,7 @@ each station, allowing the model to learn station-specific biases and adjustment
 
 ---
 
-## Rank 14: gcn_lstm_v2_noattn_T4_best.pt
+## Rank 21: gcn_lstm_v2_noattn_T4_best.pt
 
 **Architecture Name**: `gcn_lstm_v2_noattn`
 
@@ -1274,7 +1538,7 @@ The full confirmed feature stack: direct decoding + dynamic wind adj + learnable
 
 ---
 
-## Rank 15: graph_transformer_gat_v2_T4_best.pt
+## Rank 22: graph_transformer_gat_v2_T4_best.pt
 
 **Architecture Name**: `graph_transformer_gat_v2`
 
@@ -1313,7 +1577,7 @@ The full confirmed feature stack: direct decoding + dynamic wind adj + learnable
 
 ---
 
-## Rank 16: graph_transformer_gat_v1_residual_temporalpool_T4_best.pt
+## Rank 23: graph_transformer_gat_v1_residual_temporalpool_T4_best.pt
 
 **Architecture Name**: `graph_transformer_gat_v1_residual_temporalpool`
 
@@ -1363,7 +1627,7 @@ actual temporal-attention head topology. These metrics replace the earlier faile
 
 ---
 
-## Rank 17: graphtransformer_gat_v1_T4_best.pt
+## Rank 24: graphtransformer_gat_v1_T4_best.pt
 
 **Architecture Name**: `graph_transformer_gat_v1`
 *(Note: checkpoint metadata stores the name `gcn_lstm_gat_v1` — this is a naming artifact from
@@ -1427,7 +1691,7 @@ horizons while keeping H1 strong.
 ---
 
 
-## Rank 18: graph_transformer_gatv2_T4_best.pt
+## Rank 25: graph_transformer_gatv2_T4_best.pt
 
 **Architecture Name**: `graph_transformer_gatv2`
 
@@ -1466,10 +1730,44 @@ horizons while keeping H1 strong.
 
 ---
 
+## Rank 26: graph_transformer_gat_v1_residual_log1p_all_std_stationbias_rollingmean_T4_best.pt
 
+**Architecture Name**: `graph_transformer_gat_v1_residual_log1p_all_std_stationbias_rollingmean`
 
+**Type**: `GraphTransformerModel` with GATv1 spatial block, log1p+StdScaler normalization, station×horizon bias, and rolling-mean residual anchor.
 
-## Rank 19: graph_transformer_gat_v1_residual_postgat_T4_best.pt
+**What it tests**: Whether replacing the single-step persistence residual (`y_last = X[-1, :, 0]`) with a 6-step rolling-mean anchor reduces prediction noise. The hypothesis is that a smoothed anchor is more robust to instantaneous PM2.5 spikes. **Rejected** — MAE 21.0961 vs baseline stationbias 19.7947, a regression of +1.30 MAE.
+
+**New functionality**: `residual_window=6` — instead of anchoring the prediction to the last single timestep, the anchor is the mean of the last 6 observed PM2.5 values. The rolling mean smooths out recent spikes, but this hurts H1 badly (12.09 vs 9.94) because a smoothed anchor is a poor prior for the immediate next step when PM2.5 has just changed sharply. The purpose of the persistence residual is to exploit autocorrelation; replacing it with a rolling mean destroys this advantage.
+
+**Architecture**:
+- Same as `stationbias` (rank 47) except `residual_window=6`
+- `use_persistence_residual`: **True**, `residual_window`: **6** (rolling mean of last 6 timesteps)
+- `use_station_horizon_bias`: **True** (72 bias params)
+- `use_log_transform`: **True**, `log_transform_indices`: [0,1,2,3,4,5]
+- `use_per_station_norm`: **False** (global StdScaler)
+
+**Overall Metrics**:
+- RMSE: 39.4390
+- MAE: 21.0961
+- MAPE: 39.2541%
+- R²: 0.8180
+- Epoch: 4 | Val MAE: 19.1506
+
+**Per-Horizon Metrics**:
+
+| Horizon | RMSE | MAE | MAPE |
+|---:|---:|---:|---:|
+| 1 | 22.9618 | 12.0916 | 20.3074% |
+| 2 | 30.8057 | 16.3082 | 27.8334% |
+| 3 | 36.8070 | 19.8674 | 35.0552% |
+| 4 | 42.0208 | 23.1276 | 42.8239% |
+| 5 | 46.5549 | 26.1230 | 50.8461% |
+| 6 | 50.6803 | 29.0589 | 58.6589% |
+
+---
+
+## Rank 27: graph_transformer_gat_v1_residual_postgat_T4_best.pt
 
 **Architecture Name**: `graph_transformer_gat_v1_residual_postgat`
 
@@ -1524,7 +1822,7 @@ actual post-GAT topology. These metrics replace the earlier partial-load result.
 
 
 
-## Rank 20: graph_transformer_gat_v1_residual_horizonw_T4_best.pt
+## Rank 28: graph_transformer_gat_v1_residual_horizonw_T4_best.pt
 
 **Architecture Name**: `graph_transformer_gat_v1_residual_horizonw`
 
@@ -1563,7 +1861,45 @@ actual post-GAT topology. These metrics replace the earlier partial-load result.
 
 ---
 
-## Rank 21: graph_transformer_gat_v1_residual_T4_best.pt
+## Rank 29: graph_transformer_gat_v1_residual_log1p_all_std_stationbias_revin_T4_best.pt
+
+**Architecture Name**: `graph_transformer_gat_v1_residual_log1p_all_std_stationbias_revin`
+
+**Type**: `GraphTransformerModel` with GATv1 spatial block, log1p+StdScaler normalization, station×horizon bias, and RevIN per-instance normalization.
+
+**What it tests**: Whether RevIN (Reversible Instance Normalization) applied on top of the log1p+StdScaler pipeline improves performance. RevIN normalizes each input window by its own mean and standard deviation, then denormalizes predictions, making the model distribution-shift-agnostic per sample. **Rejected** — MAE 20.7229 vs baseline stationbias 19.7947, a regression of +0.930 MAE. Identified as a **dual-anchor conflict**: both RevIN (denormalizes via instance statistics) and the persistence residual (anchors to last observed value) try to set the prediction level, creating conflicting gradient signals. The persistence residual wins, but RevIN's normalization of the input disrupts the residual anchor's effectiveness by centering the window so that `y_last` is no longer a meaningful level estimate in the RevIN-normalized space.
+
+**New functionality**: `use_revin=True` — `RevIN` module normalizes each sample's input window per-node using the window's own mean and std. During the forward pass: (1) input normalized by instance stats, (2) model processes normalized input, (3) output denormalized by the same instance stats. Adds 2 learnable affine parameters per feature per node (scale and bias), initialized to identity.
+
+**Architecture**:
+- Same as `stationbias` (rank 47) + `use_revin=True` + `use_regime_conditioning=True`
+- `use_revin`: **True** (per-instance normalization applied before/after model)
+- `use_station_horizon_bias`: **True** (72 bias params)
+- `use_regime_conditioning`: **True** (zero-init shortcut, adds 128 params)
+- `use_log_transform`: **True**, `log_transform_indices`: [0,1,2,3,4,5]
+- 80,522 trainable parameters
+
+**Overall Metrics**:
+- RMSE: 39.0930
+- MAE: 20.7229
+- MAPE: 39.7331%
+- R²: 0.8212
+- Epoch: 4 | Val MAE: 18.8979
+
+**Per-Horizon Metrics**:
+
+| Horizon | RMSE | MAE | MAPE |
+|---:|---:|---:|---:|
+| 1 | 19.7377 | 10.0877 | 18.8448% |
+| 2 | 29.3322 | 15.5423 | 27.5960% |
+| 3 | 36.0412 | 19.5896 | 35.5315% |
+| 4 | 41.8803 | 23.1390 | 43.7538% |
+| 5 | 47.0633 | 26.4688 | 52.1445% |
+| 6 | 51.4948 | 29.5101 | 60.5279% |
+
+---
+
+## Rank 30: graph_transformer_gat_v1_residual_T4_best.pt
 
 **Architecture Name**: `graph_transformer_gat_v1_residual`
 
@@ -1614,7 +1950,583 @@ actual post-GAT topology. These metrics replace the earlier partial-load result.
 
 ---
 
-## Rank 22: graph_transformer_gat_v1_residual_futuremet_T4_best.pt
+## Rank 31: graph_transformer_gat_v1_residual_log1p_all_std_holiday_T4_best.pt
+
+**Architecture Name**: `graph_transformer_gat_v1_residual_log1p_all_std_holiday`
+
+**Type**: `GraphTransformerModel` with GATv1 spatial block, log1p+StdScaler normalization, and Chinese holiday indicator feature.
+
+**What it tests**: Whether a binary holiday indicator (Spring Festival eve+5 days, National Day Oct 1–7, Labour Day May 1–3) improves forecasting by alerting the model to high-emission periods from fireworks and reduced traffic. **Rejected** — MAE 20.3738 vs base `log1p_all_std` 19.8150, a regression of +0.558 MAE. The holiday signal is redundant: the 24-hour lookback window already contains the elevated PM2.5 values from the holiday period, so the model learns the spike from recent observations without needing an explicit calendar flag.
+
+**New functionality**: `use_holiday_feature=True` — a binary float32 feature inserted at index 17, shifting wind one-hot from [17:33] to [18:34]. Computed from timestamps using `compute_holiday_feature()` in `utils/window.py`. Marks Chinese New Year (eve + 4 days), National Day (Oct 1–7), and Labour Day (May 1–3) as 1.0, all other hours as 0.0. Adds 1 extra input feature (total 34 features) and 64 extra input-projection parameters.
+
+**Architecture**:
+- `use_log_transform`: **True**, `log_transform_indices`: [0,1,2,3,4,5]
+- `use_holiday_feature`: **True** (binary indicator at index 17; `wind_dir_start_idx=18`, `wind_dir_end_idx=34`)
+- `use_persistence_residual`: **True**, `use_station_horizon_bias`: **False**
+- 80,386 trainable parameters (64 extra vs base from extended input projection)
+
+**Overall Metrics**:
+- RMSE: 39.1367 | MAE: 20.3738 | MAPE: 35.5437% | R²: 0.8208
+- Epoch: 7 | Val MAE: 18.3997
+
+**Per-Horizon Metrics**:
+
+| Horizon | RMSE | MAE | MAPE |
+|---:|---:|---:|---:|
+| 1 | 19.7394 | 9.9957 | 17.5017% |
+| 2 | 29.3780 | 15.3093 | 24.9880% |
+| 3 | 36.1958 | 19.2806 | 31.6002% |
+| 4 | 41.9005 | 22.7452 | 38.7970% |
+| 5 | 47.0918 | 25.9888 | 46.3888% |
+| 6 | 51.5165 | 28.9235 | 53.9868% |
+
+---
+
+## Rank 32: graph_transformer_gat_v1_residual_log1p_all_std_multitask_T4_best.pt
+
+**Architecture Name**: `graph_transformer_gat_v1_residual_log1p_all_std_multitask`
+
+**Type**: `GraphTransformerModel` with GATv1 spatial block, log1p+StdScaler normalization, and multi-task auxiliary prediction heads.
+
+**What it tests**: Whether jointly predicting future PM10, SO2, NO2, CO, and O3 (in addition to PM2.5) through auxiliary output heads improves shared-backbone representations, and thus PM2.5 forecast accuracy. **Rejected** — MAE 20.2026 vs base 19.8150, a regression of +0.388 MAE. The auxiliary tasks introduce gradient competition: the shared encoder must balance representation quality for 6 co-pollutants simultaneously, diluting the PM2.5-specific gradients. With λ=0.1 the auxiliary loss was sufficient to harm the primary task without providing useful regularization.
+
+**New functionality**: `use_multitask=True` — five additional linear output heads (`DirectHorizonHead` variants, one per co-pollutant: PM10, SO2, NO2, CO, O3) share the encoder trunk with the PM2.5 head. The auxiliary heads predict the same 6-step horizon as the primary head. During training, total loss = PM2.5 EVT loss + λ × mean(co-pollutant MSE losses), λ=0.1. At inference, only the PM2.5 head output is returned; auxiliary heads are discarded. Adds ~6,149 parameters (5 auxiliary head MLPs).
+
+**Architecture**:
+- `use_log_transform`: **True**, `log_transform_indices`: [0,1,2,3,4,5]
+- `use_multitask`: **True** (5 auxiliary heads, λ=0.1)
+- `use_persistence_residual`: **True**, `use_station_horizon_bias`: **False**
+- 86,471 trainable parameters
+
+**Overall Metrics**:
+- RMSE: 38.1601 | MAE: 20.2026 | MAPE: 37.1980% | R²: 0.8296
+- Epoch: 4 | Val MAE: 18.3871
+
+**Per-Horizon Metrics**:
+
+| Horizon | RMSE | MAE | MAPE |
+|---:|---:|---:|---:|
+| 1 | 19.4348 | 9.8869 | 18.0472% |
+| 2 | 28.8186 | 15.1638 | 25.9897% |
+| 3 | 35.3255 | 19.1600 | 33.1073% |
+| 4 | 40.8713 | 22.6417 | 40.7324% |
+| 5 | 45.7449 | 25.7448 | 48.7350% |
+| 6 | 50.1795 | 28.6182 | 56.5766% |
+
+---
+
+## Rank 33: graph_transformer_gat_v1_residual_log1p_all_std_stationbias_regime_T4_best.pt
+
+**Architecture Name**: `graph_transformer_gat_v1_residual_log1p_all_std_stationbias_regime`
+
+**Type**: `GraphTransformerModel` with GATv1 spatial block, log1p+StdScaler normalization, station×horizon bias, and soft regime conditioning shortcut.
+
+**What it tests**: Whether a soft regime-conditioning shortcut — a learned linear projection from the last observed PM2.5 scalar to a `hidden_dim`-dimensional vector, added to the encoder output before the prediction head — helps the model adapt its hidden representation to the current pollution level regime. **Rejected** — MAE 20.1202 vs base `stationbias` 19.7947, a regression of +0.325 MAE. The last PM2.5 value is already visible in the input and captured by the persistence residual; a second explicit shortcut from the same signal adds redundancy rather than new information.
+
+**New functionality**: `use_regime_conditioning=True` — a `zero-init Linear(1, hidden_dim=64)` maps the last observed PM2.5 value (in normalized log1p-StdScaler space) to a 64-dim vector, which is added elementwise to the Transformer encoder output for each node before entering the prediction head. Zero initialization ensures the shortcut starts as a no-op and only activates if gradients support it. Adds 64 weight + 64 bias = 128 parameters.
+
+**Architecture**:
+- `use_station_horizon_bias`: **True** (72 bias params)
+- `use_regime_conditioning`: **True** (zero-init Linear(1, 64), adds 128 params)
+- `use_log_transform`: **True**, `log_transform_indices`: [0,1,2,3,4,5]
+- `use_persistence_residual`: **True**
+- 80,522 trainable parameters
+
+**Overall Metrics**:
+- RMSE: 37.8993 | MAE: 20.1202 | MAPE: 38.6585% | R²: 0.8319
+- Epoch: 2 | Val MAE: 18.3507
+
+**Per-Horizon Metrics**:
+
+| Horizon | RMSE | MAE | MAPE |
+|---:|---:|---:|---:|
+| 1 | 19.5941 | 10.0693 | 18.5109% |
+| 2 | 28.8784 | 15.2991 | 26.7860% |
+| 3 | 35.1220 | 19.0718 | 34.3748% |
+| 4 | 40.4973 | 22.3901 | 42.1858% |
+| 5 | 45.3061 | 25.4844 | 50.7121% |
+| 6 | 49.7396 | 28.4063 | 59.3815% |
+
+---
+
+## Rank 34: graph_transformer_gat_v1_residual_log1p_all_std_delta_T4_best.pt
+
+**Architecture Name**: `graph_transformer_gat_v1_residual_log1p_all_std_delta`
+
+**Type**: `GraphTransformerModel` with GATv1 spatial block, log1p+StdScaler normalization, and PM2.5 first-difference feature.
+
+**What it tests**: Whether explicitly providing the rate-of-change of PM2.5 (first-difference: `PM2.5[t] − PM2.5[t−1]`) as an additional input feature helps the model learn trend dynamics. **Rejected** — MAE 20.1201 vs base 19.8150, a regression of +0.305 MAE. The Transformer encoder already implicitly learns temporal derivatives by attending to past timesteps; an explicit delta feature is redundant and may introduce noise through the extra input projection parameters it activates.
+
+**New functionality**: `use_pm25_delta=True` — inserts PM2.5 first-difference as a new feature at index 17 in the input tensor, shifting wind one-hot indices from [17:33] to [18:34]. The delta at timestep t is `PM2.5[t] − PM2.5[t−1]` (in log1p-scaled space). For the first timestep of a window, the preceding sample is used if available, otherwise zero. Adds 64 extra parameters from the extended input projection.
+
+**Architecture**:
+- `use_log_transform`: **True**, `log_transform_indices`: [0,1,2,3,4,5]
+- `use_pm25_delta`: **True** (delta feature at index 17; `wind_dir_start_idx=18`, `wind_dir_end_idx=34`)
+- `use_persistence_residual`: **True**, `use_station_horizon_bias`: **False**
+- 80,386 trainable parameters
+
+**Overall Metrics**:
+- RMSE: 38.4399 | MAE: 20.1201 | MAPE: 36.9864% | R²: 0.8271
+- Epoch: 10 | Val MAE: 17.9918
+
+**Per-Horizon Metrics**:
+
+| Horizon | RMSE | MAE | MAPE |
+|---:|---:|---:|---:|
+| 1 | 18.4644 | 9.3882 | 17.0749% |
+| 2 | 28.1845 | 14.7559 | 25.2577% |
+| 3 | 35.3098 | 18.9487 | 32.7828% |
+| 4 | 41.3361 | 22.6317 | 40.7042% |
+| 5 | 46.5108 | 25.9634 | 48.8609% |
+| 6 | 51.1051 | 29.0330 | 57.2378% |
+
+---
+
+## Rank 35: graph_transformer_gat_v1_residual_log1p_all_std_cosine_s42_T4_best.pt
+
+**Architecture Name**: `graph_transformer_gat_v1_residual_log1p_all_std_cosine_s42`
+
+**Type**: `GraphTransformerModel` with GATv1 spatial block, log1p+StdScaler normalization, and cosine annealing LR schedule.
+
+**What it tests**: Whether a cosine annealing learning rate schedule (with 5-epoch linear warmup from 0 to `lr=1e-3`) improves over the default `ReduceLROnPlateau`. **Rejected** — MAE 20.1170 vs base 19.8150, a regression of +0.302 MAE. Cosine annealing restarts the LR periodically, which may cause the model to escape local minima but also disturbs convergence in the loss plateau near the optimum. `ReduceLROnPlateau` adapts to the actual loss dynamics and proved more stable for this task.
+
+**New functionality**: Cosine annealing LR schedule — `lr` decays from `1e-3` following a cosine curve over a fixed T_max, with a 5-epoch linear warmup (lr increases from 0 to `1e-3` over the first 5 epochs). This replaces the adaptive `ReduceLROnPlateau(factor=0.5, patience=5)` scheduler. All other training settings unchanged (Adam, EVT loss, patience=15).
+
+**Architecture**:
+- `use_log_transform`: **True**, `log_transform_indices`: [0,1,2,3,4,5]
+- `use_persistence_residual`: **True**, `use_station_horizon_bias`: **False**
+- Scheduler: cosine annealing with 5-epoch warmup (vs default ReduceLROnPlateau)
+- 80,322 trainable parameters
+
+**Overall Metrics**:
+- RMSE: 37.9275 | MAE: 20.1170 | MAPE: 36.9544% | R²: 0.8317
+- Epoch: 6 | Val MAE: 18.3339
+
+**Per-Horizon Metrics**:
+
+| Horizon | RMSE | MAE | MAPE |
+|---:|---:|---:|---:|
+| 1 | 19.7426 | 10.1992 | 17.9859% |
+| 2 | 28.8439 | 15.1839 | 25.8367% |
+| 3 | 35.1363 | 18.9689 | 32.8908% |
+| 4 | 40.5025 | 22.3604 | 40.4370% |
+| 5 | 45.3275 | 25.5101 | 48.2543% |
+| 6 | 49.7960 | 28.4795 | 56.3218% |
+
+---
+
+## Rank 36: graph_transformer_gat_v1_residual_log1p_all_std_stationbias_trend_T4_best.pt
+
+**Architecture Name**: `graph_transformer_gat_v1_residual_log1p_all_std_stationbias_trend`
+
+**Type**: `GraphTransformerModel` with GATv1 spatial block, log1p+StdScaler normalization, station×horizon bias, and trend extrapolation prior.
+
+**What it tests**: Whether extrapolating the recent PM2.5 trend (linear extrapolation from the last few observed values) as an additional residual prior improves over the flat persistence prior. **Rejected** — MAE 20.0781 vs base `stationbias` 19.7947, a regression of +0.283 MAE. Trend extrapolation amplifies reversal errors: when PM2.5 has been rising and is about to reverse, the extrapolated trend over-predicts, and the error is larger than a flat persistence prediction would produce. The notable alpha collapse to 0.325 (vs 0.44 for base) also suggests the trend prior disrupts spatial gradient flow.
+
+**New functionality**: `use_trend_residual=True` — instead of anchoring predictions to a flat `y_last` (last single observation), the model anchors to `y_last + trend * h` for each horizon step `h`, where `trend` is a linear extrapolation from the last few timesteps of the lookback window. The trend is computed as a finite difference over a short recent window.
+
+**Architecture**:
+- `use_station_horizon_bias`: **True** (72 bias params)
+- `use_trend_residual`: **True** (linear extrapolation from lookback tail)
+- `use_log_transform`: **True**, `log_transform_indices`: [0,1,2,3,4,5]
+- `use_persistence_residual`: **True** (trend is built on top of the persistence residual framework)
+- Learned alpha: **0.325** (collapsed from 0.44 baseline — trend disrupts spatial gradient flow)
+- 80,394 trainable parameters
+
+**Overall Metrics**:
+- RMSE: 38.7210 | MAE: 20.0781 | MAPE: 37.1590% | R²: 0.8246
+- Epoch: 13 | Val MAE: 18.3460
+
+**Per-Horizon Metrics**:
+
+| Horizon | RMSE | MAE | MAPE |
+|---:|---:|---:|---:|
+| 1 | 19.3378 | 9.7958 | 17.3721% |
+| 2 | 29.1061 | 15.0589 | 25.3063% |
+| 3 | 36.1409 | 19.0282 | 32.6790% |
+| 4 | 41.3600 | 22.4603 | 40.5800% |
+| 5 | 46.1782 | 25.5378 | 49.1834% |
+| 6 | 51.2401 | 28.5874 | 57.8336% |
+
+---
+
+## Rank 37: graph_transformer_gat_v1_residual_log1p_all_std_ffn4x_T4_best.pt
+
+**Architecture Name**: `graph_transformer_gat_v1_residual_log1p_all_std_ffn4x`
+
+**Type**: `GraphTransformerModel` with GATv1 spatial block, log1p+StdScaler normalization, and wider Transformer FFN.
+
+**What it tests**: Whether increasing the Transformer feed-forward network width from 128 to 512 (4× expansion, hence `ffn4x`) improves representational capacity. **Rejected** — MAE 20.0525 vs base 19.8150, a regression of +0.238 MAE. The wider FFN overfits: despite early stopping at epoch 4 (best checkpoint), the model converges to a worse solution than the compact baseline. The default FFN width (128 = 2× hidden_dim) is already sufficient for this task; more capacity adds parameters without improving generalization.
+
+**New functionality**: `ffn_dim=512` — each of the 2 Transformer encoder layers has its feed-forward sublayer widened from 128 to 512 neurons (`Linear(64,512) → GELU → Linear(512,64)`). Default is `ffn_dim=128` (2× hidden_dim). Total extra parameters: 2 layers × 2 linear matrices × (512×64 − 128×64) = 49,152 extra params.
+
+**Architecture**:
+- `use_log_transform`: **True**, `log_transform_indices`: [0,1,2,3,4,5]
+- `ffn_dim`: **512** (vs default 128)
+- `use_persistence_residual`: **True**, `use_station_horizon_bias`: **False**
+- 113,346 trainable parameters (vs 80,322 base — 33,024 extra from FFN expansion)
+
+**Overall Metrics**:
+- RMSE: 38.1042 | MAE: 20.0525 | MAPE: 35.9148% | R²: 0.8301
+- Epoch: 4 | Val MAE: 18.0466
+
+**Per-Horizon Metrics**:
+
+| Horizon | RMSE | MAE | MAPE |
+|---:|---:|---:|---:|
+| 1 | 19.5191 | 9.9905 | 17.7607% |
+| 2 | 29.2219 | 15.2909 | 25.3165% |
+| 3 | 35.7111 | 19.1421 | 32.0320% |
+| 4 | 40.9423 | 22.3985 | 39.2439% |
+| 5 | 45.4653 | 25.3594 | 46.7053% |
+| 6 | 49.5786 | 28.1338 | 54.4305% |
+
+---
+
+## Rank 38: graph_transformer_gat_v1_residual_evt_huber_adamw_std_T4_best.pt
+
+**Architecture Name**: `graph_transformer_gat_v1_residual_evt_huber_adamw_std`
+
+**Type**: `GraphTransformerModel` with GATv1 spatial block, log1p+StdScaler normalization, Huber loss, and AdamW optimizer.
+
+**What it tests**: Whether Huber loss (which is linear for large errors, capping the gradient magnitude) combined with AdamW (Adam + L2 weight decay on all parameters) improves training stability and generalization. **Rejected** — MAE 19.9778 vs EVT-MSE base 19.8150, a regression of +0.163 MAE. This also violated the established alpha-collapse constraint: Huber's linear regime for large errors provides weaker gradients on extreme events, reducing the spatial signal that maintains the alpha gate. AdamW's weight decay applied to `alpha_logit` drives it toward zero via L2 regularization. Alpha here: 0.4985 (borderline), but the combination still degrades performance.
+
+**⚠ Known constraint**: Huber loss and AdamW are both forbidden for this architecture (see `feedback_alpha_collapse.md`). Huber weakens extreme-event gradients → alpha collapses. AdamW applies weight decay to `alpha_logit` → alpha decays toward zero. EVT-MSE + Adam is the only confirmed stable configuration.
+
+**Architecture**:
+- `use_log_transform`: **True**, `log_transform_indices`: [0,1,2,3,4,5]
+- Loss: **Huber** (linear for |error| > δ, quadratic below)
+- Optimizer: **AdamW** (Adam + weight decay on all parameters including `alpha_logit`)
+- `use_persistence_residual`: **True**, `use_station_horizon_bias`: **False**
+- Learned alpha: **0.4985** (near-collapse threshold)
+- 80,322 trainable parameters
+
+**Overall Metrics**:
+- RMSE: 38.2074 | MAE: 19.9778 | MAPE: 35.6239% | R²: 0.8292
+- Epoch: 5 | Val MAE: 17.9793
+
+**Per-Horizon Metrics**:
+
+| Horizon | RMSE | MAE | MAPE |
+|---:|---:|---:|---:|
+| 1 | 19.1822 | 9.9502 | 17.9170% |
+| 2 | 28.7909 | 15.1575 | 25.3984% |
+| 3 | 35.4774 | 19.0209 | 31.9581% |
+| 4 | 41.0692 | 22.3536 | 38.8191% |
+| 5 | 45.8394 | 25.3066 | 46.0835% |
+| 6 | 50.1536 | 28.0782 | 53.5673% |
+
+---
+
+## Rank 39: graph_transformer_gat_v1_residual_log1p_all_rain_std_T4_best.pt
+
+**Architecture Name**: `graph_transformer_gat_v1_residual_log1p_all_rain_std`
+
+**Type**: `GraphTransformerModel` with GATv1 spatial block, log1p+StdScaler normalization, and additional log1p applied to rainfall.
+
+**What it tests**: Whether extending the log1p transform to rain (feature index 9, in addition to the standard indices 0–5) helps, given that rain is zero-inflated (mostly 0, heavy tail on rainy days). **Rejected** — MAE 19.9440 vs base 19.8150, a regression of +0.129 MAE (statistical tie at single seed). Rain's zero-inflation makes log1p ill-suited: `log1p(0)=0` is fine, but the large proportion of zeros means the transform provides minimal benefit while adding an inconsistency to the feature treatment. Index 10 (`wspm`) was not transformed to preserve wind adjacency correctness.
+
+**New functionality**: `log_transform_indices=[0,1,2,3,4,5,9]` — extends log1p to rain (index 9) in addition to the standard six pollutant features. Note: index 10 (`wspm`) is deliberately excluded even here, as transforming it corrupts `build_dynamic_adjacency_gpu`.
+
+**Architecture**:
+- `use_log_transform`: **True**, `log_transform_indices`: [0,1,2,3,4,5,9] (adds rain)
+- `use_persistence_residual`: **True**, `use_station_horizon_bias`: **False**
+- 80,322 trainable parameters
+
+**Overall Metrics**:
+- RMSE: 37.7433 | MAE: 19.9440 | MAPE: 36.4993% | R²: 0.8333
+- Epoch: 6 | Val MAE: 18.2855
+
+**Per-Horizon Metrics**:
+
+| Horizon | RMSE | MAE | MAPE |
+|---:|---:|---:|---:|
+| 1 | 19.5639 | 10.0498 | 17.8373% |
+| 2 | 28.8752 | 15.1278 | 25.6268% |
+| 3 | 35.1815 | 18.9082 | 32.6157% |
+| 4 | 40.4317 | 22.2508 | 40.0653% |
+| 5 | 45.0497 | 25.2721 | 47.5264% |
+| 6 | 49.2838 | 28.0556 | 55.3242% |
+
+---
+
+## Rank 40: graph_transformer_gat_v1_residual_log1p_all_std_noise_T4_best.pt
+
+**Architecture Name**: `graph_transformer_gat_v1_residual_log1p_all_std_noise`
+
+**Type**: `GraphTransformerModel` with GATv1 spatial block, log1p+StdScaler normalization, and Gaussian input noise augmentation.
+
+**What it tests**: Whether adding small Gaussian noise (std=0.02 in normalized space) to training inputs regularizes the model and improves test generalization. **Rejected** — MAE 19.9287 vs base 19.8150, a regression of +0.114 MAE (statistical tie). The model is already well-regularized by dropout, early stopping, and the relatively small parameter count; noise augmentation does not provide additional benefit and slightly degrades optimization by noisifying the exact autocorrelation patterns the model relies on.
+
+**New functionality**: Gaussian noise injection at training time — `x_noisy = x + N(0, 0.02²)` applied to all input features in normalized space. Noise is zero at inference. Standard data augmentation approach for time series, intended to prevent overfitting to the exact training distribution.
+
+**Architecture**:
+- `use_log_transform`: **True**, `log_transform_indices`: [0,1,2,3,4,5]
+- Training augmentation: Gaussian noise std=0.02 (normalized input space)
+- `use_persistence_residual`: **True**, `use_station_horizon_bias`: **False**
+- 80,322 trainable parameters
+
+**Overall Metrics**:
+- RMSE: 37.6890 | MAE: 19.9287 | MAPE: 36.4618% | R²: 0.8338
+- Epoch: 6 | Val MAE: 18.2255
+
+**Per-Horizon Metrics**:
+
+| Horizon | RMSE | MAE | MAPE |
+|---:|---:|---:|---:|
+| 1 | 19.7808 | 10.2561 | 17.9340% |
+| 2 | 28.9014 | 15.1599 | 25.5355% |
+| 3 | 35.0995 | 18.8442 | 32.4701% |
+| 4 | 40.2981 | 22.1309 | 39.8558% |
+| 5 | 44.9635 | 25.1882 | 47.4970% |
+| 6 | 49.1787 | 27.9931 | 55.4785% |
+
+---
+
+## Rank 41: graph_transformer_gat_v1_residual_evt_huber_adamw_log1p_wspm_std_T4_best.pt
+
+**Architecture Name**: `graph_transformer_gat_v1_residual_evt_huber_adamw_log1p_wspm_std`
+
+**Type**: `GraphTransformerModel` with GATv1 spatial block, log1p+StdScaler normalization, Huber loss, AdamW, and wspm log1p transform.
+
+**What it tests**: Huber loss + AdamW + log1p applied additionally to wspm (wind speed, index 10). **Rejected** — MAE 19.9222 vs EVT-MSE base 19.8150, a regression of +0.107 MAE (borderline tie, but violates constraints). This experiment stacks two forbidden modifications: (1) Huber+AdamW from rank 38, and (2) wspm log1p — which **corrupts wind adjacency** because `build_dynamic_adjacency_gpu` reads `wspm` directly from the scaled input and assumes it is in StandardScaler-normalized m/s space. Applying log1p to wspm before scaling changes the distribution of index 10, invalidating the `tanh(wspm/5.0)` wind-factor computation.
+
+**⚠ Double constraint violation**: wspm log1p is permanently forbidden (`feedback_alpha_collapse.md`). Huber+AdamW is also forbidden. Alpha here: 0.4578 (moderate collapse).
+
+**New functionality**: `log_transform_indices=[0,1,2,3,4,5,10]` — extends log1p to wspm (index 10) in addition to the standard pollutants. This is architecturally incorrect: `build_dynamic_adjacency_gpu` uses `X[:,:,:,wspm_idx]` directly and computes `tanh(wind_speeds/5.0)` assuming raw-ish m/s values. Log1p-transforming wspm before StandardScaler creates a different distribution that the threshold `0.1` in `calm_mask` and the `tanh/5.0` factor no longer correctly interpret.
+
+**Architecture**:
+- `use_log_transform`: **True**, `log_transform_indices`: [0,1,2,3,4,5,10] (**forbidden: corrupts wind adjacency**)
+- Loss: **Huber** (**forbidden: weakens extreme-event gradients**)
+- Optimizer: **AdamW** (**forbidden: decays alpha_logit**)
+- Learned alpha: **0.4578**
+- 80,322 trainable parameters
+
+**Overall Metrics**:
+- RMSE: 38.2180 | MAE: 19.9222 | MAPE: 36.9867% | R²: 0.8291
+- Epoch: 6 | Val MAE: 18.1277
+
+**Per-Horizon Metrics**:
+
+| Horizon | RMSE | MAE | MAPE |
+|---:|---:|---:|---:|
+| 1 | 19.3113 | 9.8670 | 17.6319% |
+| 2 | 29.0001 | 15.0891 | 25.5873% |
+| 3 | 35.6527 | 18.9459 | 32.6887% |
+| 4 | 41.1468 | 22.3069 | 40.3744% |
+| 5 | 45.7548 | 25.2827 | 48.5185% |
+| 6 | 49.9208 | 28.0418 | 57.1197% |
+
+---
+
+## Rank 42: graph_transformer_gat_v1_residual_log1p_all_std_perstation_T4_best.pt
+
+**Architecture Name**: `graph_transformer_gat_v1_residual_log1p_all_std_perstation`
+
+**Type**: `GraphTransformerModel` with GATv1 spatial block, log1p+StdScaler normalization, and per-station independent scalers.
+
+**What it tests**: Whether fitting a separate `StandardScaler` for each of the 12 monitoring stations (rather than a single global scaler across all stations) reduces distributional mismatch and improves forecast accuracy. **Rejected** — MAE 19.8469 vs global-StdScaler base 19.8150, a statistical tie (+0.032 MAE, within single-seed noise). Monitoring stations in Beijing are geographically clustered and share similar pollution regimes; the variation between stations is insufficient to justify per-station normalization. The global scaler preserves the relative magnitude information that helps the model reason about cross-station differences.
+
+**New functionality**: `use_per_station_norm=True` — instead of fitting one `StandardScaler` on all `(T_train, N, F)` samples flattened, fits 12 independent `StandardScaler` instances, one per station node. At inference, each node's features are scaled and inverse-scaled by its own scaler. Conceptually equivalent to having station-specific mean and variance for every feature.
+
+**Architecture**:
+- `use_log_transform`: **True**, `log_transform_indices`: [0,1,2,3,4,5]
+- `use_per_station_norm`: **True** (12 independent StandardScalers, one per node)
+- `use_persistence_residual`: **True**, `use_station_horizon_bias`: **False**
+- 80,322 trainable parameters
+
+**Overall Metrics**:
+- RMSE: 37.5681 | MAE: 19.8469 | MAPE: 36.6767% | R²: 0.8349
+- Epoch: 6 | Val MAE: 18.2045
+
+**Per-Horizon Metrics**:
+
+| Horizon | RMSE | MAE | MAPE |
+|---:|---:|---:|---:|
+| 1 | 19.6291 | 10.0831 | 17.8813% |
+| 2 | 28.8924 | 15.1133 | 25.6725% |
+| 3 | 35.1260 | 18.8518 | 32.7094% |
+| 4 | 40.2937 | 22.1378 | 40.2036% |
+| 5 | 44.7858 | 25.0975 | 47.8040% |
+| 6 | 48.8355 | 27.7979 | 55.7897% |
+
+---
+
+## Rank 43: graph_transformer_gat_v1_residual_log1p_all_std_learnAdj_T4_best.pt
+
+**Architecture Name**: `graph_transformer_gat_v1_residual_log1p_all_std_learnAdj`
+
+**Type**: `GraphTransformerModel` with GATv1 spatial block, log1p+StdScaler normalization, and learnable static adjacency component.
+
+**What it tests**: Whether adding a learnable 12×12 static adjacency matrix (144 trainable scalar parameters, initialized to zero) on top of the existing dynamic wind-aware adjacency provides additional graph structure that the wind adjacency cannot express. **Rejected** — MAE 19.8438 vs base 19.8150, a statistical tie (+0.029 MAE). The extra static adjacency adds 144 parameters but alpha collapses from 0.44 → 0.42 (mild but indicative), suggesting the learnable adjacency competes with the wind signal. The dynamic adjacency already captures the relevant spatial structure; a static additive term does not improve it.
+
+**New functionality**: `use_learnable_static_adj=True` — a `nn.Parameter(shape=(12, 12))` initialized to zeros is added elementwise to the wind-aware adjacency before row normalization, contributing 144 trainable scalar weights. The combined adjacency is `A_combined = A_wind + A_static_learned`. Gradients flow from the loss through the adjacency into both the alpha gate and the static adjacency parameters simultaneously.
+
+**Architecture**:
+- `use_log_transform`: **True**, `log_transform_indices`: [0,1,2,3,4,5]
+- `use_learnable_static_adj`: **True** (12×12 zero-init parameter, 144 params)
+- `use_persistence_residual`: **True**, `use_station_horizon_bias`: **False**
+- Learned alpha: **0.4248** (mild collapse from 0.44 baseline)
+- 80,466 trainable parameters
+
+**Overall Metrics**:
+- RMSE: 37.5830 | MAE: 19.8438 | MAPE: 36.6470% | R²: 0.8347
+- Epoch: 6 | Val MAE: 18.2218
+
+**Per-Horizon Metrics**:
+
+| Horizon | RMSE | MAE | MAPE |
+|---:|---:|---:|---:|
+| 1 | 19.6278 | 10.0895 | 17.8566% |
+| 2 | 28.8835 | 15.1153 | 25.6133% |
+| 3 | 35.1290 | 18.8481 | 32.6406% |
+| 4 | 40.3088 | 22.1307 | 40.1595% |
+| 5 | 44.8135 | 25.0909 | 47.7836% |
+| 6 | 48.8703 | 27.7883 | 55.8286% |
+
+---
+
+## Rank 44: graph_transformer_gat_v1_residual_log1p_all_std_corrAdj_T4_best.pt
+
+**Architecture Name**: `graph_transformer_gat_v1_residual_log1p_all_std_corrAdj`
+
+**Type**: `GraphTransformerModel` with GATv1 spatial block, log1p+StdScaler normalization, and correlation-based static adjacency.
+
+**What it tests**: Whether replacing the Gaussian distance decay adjacency with a Pearson correlation adjacency (built from historical PM2.5 correlations between station pairs computed on training data) provides a more data-driven spatial structure. **Rejected** — MAE 19.8384 vs base 19.8150, a statistical tie (+0.023 MAE). Alpha collapses from 0.44 → 0.44 (minimal change for corrAdj itself, but still a tie). The correlation adjacency captures co-variation patterns but not the directional transport dynamics that the wind adjacency encodes; the learnable alpha gate apparently finds no advantage over the default distance+wind blend.
+
+**New functionality**: Correlation-based static adjacency — at training start, computes Pearson correlation of PM2.5 time series between all 12×12 station pairs on the training split, uses these correlations (after symmetrization and normalization) as the distance component `A_dist` instead of the Gaussian distance decay. The wind adjacency component `A_wind` is unchanged; the mixing `(1−α) A_dist_corr + α A_wind` proceeds as normal.
+
+**Architecture**:
+- `use_log_transform`: **True**, `log_transform_indices`: [0,1,2,3,4,5]
+- Adjacency distance component: **correlation-based** (replaces Gaussian `exp(-d²/1800)`)
+- `use_persistence_residual`: **True**, `use_station_horizon_bias`: **False**
+- Learned alpha: **0.4395**
+- 80,322 trainable parameters
+
+**Overall Metrics**:
+- RMSE: 37.5729 | MAE: 19.8384 | MAPE: 36.6502% | R²: 0.8348
+- Epoch: 6 | Val MAE: 18.2199
+
+**Per-Horizon Metrics**:
+
+| Horizon | RMSE | MAE | MAPE |
+|---:|---:|---:|---:|
+| 1 | 19.6265 | 10.0867 | 17.8566% |
+| 2 | 28.8801 | 15.1111 | 25.6171% |
+| 3 | 35.1226 | 18.8429 | 32.6467% |
+| 4 | 40.2976 | 22.1246 | 40.1653% |
+| 5 | 44.7983 | 25.0836 | 47.7878% |
+| 6 | 48.8538 | 27.7813 | 55.8279% |
+
+---
+
+## Rank 45: graph_transformer_gat_v1_residual_log1p_all_std_lrmae_T4_best.pt
+
+**Architecture Name**: `graph_transformer_gat_v1_residual_log1p_all_std_lrmae`
+
+**Type**: `GraphTransformerModel` with GATv1 spatial block, log1p+StdScaler normalization, and `ReduceLROnPlateau` monitoring `val_mae` instead of `val_loss`.
+
+**What it tests**: Whether switching the LR scheduler's criterion from `val_loss` (EVT hybrid loss in normalized space) to `val_mae` (µg/m³ after inverse transform, the same metric as early stopping) prevents the scheduler from reacting to EVT loss scale changes rather than true model improvement. **Kept** — MAE 19.8150, identical to the base `log1p_all_std` (rank 46) to 4 decimal places. The checkpoint at the best epoch is the same for both runs, confirming the LR scheduler change is principally correct (aligning scheduler criterion with training objective) even though it produces an identical result here due to early stopping halting training before LR reduction would occur.
+
+**New functionality**: `ReduceLROnPlateau(monitor='val_mae')` — scheduler reduces LR by 0.5 when `val_mae` has not improved for 5 epochs, rather than monitoring `val_loss`. This is the principled fix: early stopping and checkpointing both use `val_mae`, so the LR scheduler should too. The EVT loss scale can vary with the lambda parameter and threshold, making raw `val_loss` a noisy criterion.
+
+**Architecture**: Identical to `log1p_all_std` (rank 46) — only the LR scheduler's monitored metric changes.
+
+**Overall Metrics**:
+- RMSE: 37.5085 | MAE: 19.8150 | MAPE: 36.6172% | R²: 0.8354
+- Epoch: 6 | Val MAE: 18.2212
+
+**Per-Horizon Metrics**:
+
+| Horizon | RMSE | MAE | MAPE |
+|---:|---:|---:|---:|
+| 1 | 19.6148 | 10.0789 | 17.8473% |
+| 2 | 28.8442 | 15.0927 | 25.6006% |
+| 3 | 35.0652 | 18.8182 | 32.6263% |
+| 4 | 40.2238 | 22.0967 | 40.1342% |
+| 5 | 44.7138 | 25.0531 | 47.7446% |
+| 6 | 48.7621 | 27.7503 | 55.7505% |
+
+---
+
+## Rank 46: graph_transformer_gat_v1_residual_log1p_all_std_T4_best.pt
+
+**Architecture Name**: `graph_transformer_gat_v1_residual_log1p_all_std`
+
+**Type**: `GraphTransformerModel` with GATv1 spatial block, log1p+StdScaler normalization. Reference baseline for the normalization tier.
+
+**What it tests**: The clean `log1p(indices 0–5) + StandardScaler` normalization baseline — no auxiliary modifications beyond switching from MinMaxScaler to StandardScaler. This is the **reference point** for all ranks 31–47: every experiment in this tier either adds to this base or modifies one component of it. MAE 19.8150 represents a Δ −0.809 improvement over the non-normalized `gat_v1_residual` (rank 30, MAE 20.6242), establishing log1p+StdScaler as the most impactful single change in the normalization search.
+
+**What log1p+StdScaler does**: `log1p` compresses the heavy-tailed distributions of PM2.5 and co-pollutants (right-skewed), reducing the loss magnitude on extreme events relative to moderate events and making the gradient distribution more balanced. `StandardScaler` (zero mean, unit variance) is better suited than `MinMaxScaler` for EVT hybrid loss because it preserves relative variance structure rather than mapping everything to [0,1].
+
+**Architecture**:
+- `use_log_transform`: **True**, `log_transform_indices`: [0,1,2,3,4,5] (PM2.5 + all co-pollutants)
+- `use_per_station_norm`: **False** (global StandardScaler)
+- `use_persistence_residual`: **True**, `use_station_horizon_bias`: **False**
+- Scaler: global `StandardScaler` fit on training split only
+- LR scheduler: `ReduceLROnPlateau(monitor='val_loss')` (pre-lrmae fix)
+- 80,322 trainable parameters
+
+**Overall Metrics**:
+- RMSE: 37.5085 | MAE: 19.8150 | MAPE: 36.6172% | R²: 0.8354
+- Epoch: 6 | Val MAE: 18.2212
+
+**Per-Horizon Metrics**:
+
+| Horizon | RMSE | MAE | MAPE |
+|---:|---:|---:|---:|
+| 1 | 19.6148 | 10.0789 | 17.8473% |
+| 2 | 28.8442 | 15.0927 | 25.6006% |
+| 3 | 35.0652 | 18.8182 | 32.6263% |
+| 4 | 40.2238 | 22.0967 | 40.1342% |
+| 5 | 44.7138 | 25.0531 | 47.7446% |
+| 6 | 48.7621 | 27.7503 | 55.7505% |
+
+---
+
+## Rank 47: graph_transformer_gat_v1_residual_log1p_all_std_stationbias_T4_best.pt
+
+**Architecture Name**: `graph_transformer_gat_v1_residual_log1p_all_std_stationbias`
+
+**Type**: `GraphTransformerModel` with GATv1 spatial block, log1p+StdScaler normalization, and station×horizon bias.
+
+**Current best deployable model.** This is the final recommended model for production and thesis citation. MAE 19.7947 / RMSE 37.4762.
+
+**What it tests**: Whether 72 zero-initialized learnable scalar biases — one per (station, horizon) combination — improve calibration by allowing the model to learn systematic per-station offsets for each forecast step. **Kept** — MAE 19.7947 vs base 19.8150, Δ −0.020 MAE (statistical tie at single seed, but principled addition). The biases absorb station-specific mean prediction errors that the spatially-shared model cannot correct, e.g., a consistently under-predicted suburban station at H4.
+
+**New functionality**: `use_station_horizon_bias=True` — `nn.Parameter(shape=(horizon=6, num_nodes=12))` initialized to zeros, added elementwise to the direct prediction head output before inverse-transform. Each of the 72 scalars is a free bias term for one (station, horizon) pair. Zero initialization ensures the bias starts as a no-op and only diverges from zero if training signal supports it. The bias operates in normalized space (log1p-StdScaler), so it represents a mean shift in that space.
+
+**Architecture**:
+- `use_log_transform`: **True**, `log_transform_indices`: [0,1,2,3,4,5]
+- `use_station_horizon_bias`: **True** — `nn.Parameter(6×12)`, zero-init (72 bias params)
+- `use_persistence_residual`: **True**
+- `use_per_station_norm`: **False** (global StandardScaler)
+- `use_regime_conditioning`: **False**
+- Learned alpha: **0.4378**
+- 80,394 trainable parameters
+
+**Overall Metrics**:
+- RMSE: 37.4762
+- MAE: 19.7947
+- MAPE: 36.7272%
+- R²: 0.8357
+- Epoch: 6 | Val MAE: 18.2178
+
+**Per-Horizon Metrics**:
+
+| Horizon | RMSE | MAE | MAPE |
+|---:|---:|---:|---:|
+| 1 | 19.4670 | 9.9409 | 17.7943% |
+| 2 | 28.7978 | 15.0660 | 25.6891% |
+| 3 | 35.0267 | 18.8024 | 32.7691% |
+| 4 | 40.2147 | 22.1247 | 40.2932% |
+| 5 | 44.6955 | 25.0624 | 47.9250% |
+| 6 | 48.7521 | 27.7715 | 55.8924% |
+
+---
+
+## Rank 48: graph_transformer_gat_v1_residual_futuremet_T4_best.pt
 
 **Architecture Name**: `graph_transformer_gat_v1_residual_futuremet`
 

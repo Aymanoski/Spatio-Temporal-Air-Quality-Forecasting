@@ -134,8 +134,8 @@ CONFIG = {
     'evt_lambda': 0.05,            # Base weight of EVT tail component (used if no schedule)
     'evt_tail_quantile': 0.90,     # Threshold quantile for extremes
     'evt_xi': 0.10,                # GPD shape parameter
-    'evt_threshold': None,   
-    'evt_threshold_mode': 'global',      # Populated from training targets
+    'evt_threshold': None,
+    'evt_threshold_mode': 'per_node',    # 'global' (single 90th pct) | 'per_node' (12 thresholds, one per station)
 
     # EVT Improvements: DISABLED (fixed λ=0.05 validation)
     'evt_asymmetric_penalty': False,        # Disabled for baseline comparison
@@ -218,7 +218,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_rawwspm',
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_pernodeevt',
 
     # Multi-task auxiliary prediction — TRIED AND REJECTED 2026-04-24:
     # lambda=0.1 → test MAE 20.200, RMSE 38.157. Smaller lambda also failed.
@@ -247,7 +247,7 @@ CONFIG = {
     # Exp 6: Soft regime conditioning.
     # Injects last PM2.5 (normalized) directly into enc_out before the head via
     # a zero-initialized Linear(1, hidden_dim). Starts identical to baseline.
-    'use_regime_conditioning': True,
+    'use_regime_conditioning': False,  # TRIED AND REJECTED 2026-04-25: test MAE 20.118 — pm25 already in input
 
     # Exp 7: Trend extrapolation residual anchor.
     # Replaces flat persistence prior with y_last + h * slope_last_6h.

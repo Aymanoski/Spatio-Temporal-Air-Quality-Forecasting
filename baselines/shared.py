@@ -1,13 +1,16 @@
 """
 Shared data loading and evaluation for baseline models.
 
-Uses the exact same data pipeline as the main GCN-LSTM training script:
-- Same chronological train/val/test split (70/15/15)
-- Same MinMaxScaler fitted on training data only
-- Same inverse-transform for metric computation
-- Same MAPE threshold (5 ug/m3)
+Shared data loading and evaluation for baseline models.
 
-This ensures fair comparison between baselines and the main models.
+NOTE: This module uses MinMaxScaler (no log1p), which does NOT match the current
+best model's preprocessing (StandardScaler + log1p on indices 0-5). Baselines
+trained here are not directly comparable to the GraphTransformer results on
+normalized metrics; compare on inverse-transformed µg/m³ (MAE/RMSE) only.
+
+- Same chronological train/val/test split (70/15/15)
+- MinMaxScaler fitted on training data only
+- Same MAPE threshold (5 µg/m³)
 """
 
 import numpy as np
