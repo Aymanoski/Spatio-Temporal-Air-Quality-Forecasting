@@ -123,7 +123,7 @@ CONFIG = {
     'weight_decay': 1e-5,
     'optimizer_type': 'adam',  # AdamW TRIED AND REJECTED 2026-04-24: alpha collapsed 0.64→0.16, test MAE 19.977 vs 19.813. Weight decay destabilizes learnable alpha gate.
     'epochs': 100,
-    'patience': 15,          # Early stopping patience (back to original)
+    'patience': 25,          # Experiment: 15→25 to test whether model stops too early (baseline was patience=15)
     'teacher_forcing_start': 1.0,  # Initial teacher forcing ratio
     'teacher_forcing_end': 0.0,    # Final teacher forcing ratio
 
@@ -135,7 +135,7 @@ CONFIG = {
     'evt_tail_quantile': 0.90,     # Threshold quantile for extremes
     'evt_xi': 0.10,                # GPD shape parameter
     'evt_threshold': None,
-    'evt_threshold_mode': 'per_node',    # 'global' (single 90th pct) | 'per_node' (12 thresholds, one per station)
+    'evt_threshold_mode': 'global',      # 'global' (single 90th pct) | 'per_node' TRIED AND REJECTED 2026-04-29: tie (MAE 19.775 vs 19.793, RMSE 37.428 vs 37.475)
 
     # EVT Improvements: DISABLED (fixed λ=0.05 validation)
     'evt_asymmetric_penalty': False,        # Disabled for baseline comparison
@@ -218,7 +218,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_pernodeevt',
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_p25',
 
     # Multi-task auxiliary prediction — TRIED AND REJECTED 2026-04-24:
     # lambda=0.1 → test MAE 20.200, RMSE 38.157. Smaller lambda also failed.
