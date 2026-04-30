@@ -123,7 +123,7 @@ CONFIG = {
     'weight_decay': 1e-5,
     'optimizer_type': 'adam',  # AdamW TRIED AND REJECTED 2026-04-24: alpha collapsed 0.64→0.16, test MAE 19.977 vs 19.813. Weight decay destabilizes learnable alpha gate.
     'epochs': 100,
-    'patience': 25,          # Experiment: 15→25 to test whether model stops too early (baseline was patience=15)
+    'patience': 15,          # patience=25 TRIED AND REJECTED 2026-04-29: best epoch still 7, no gain (MAE 19.799 vs 19.793). Model converges fast, patience is not the bottleneck.
     'teacher_forcing_start': 1.0,  # Initial teacher forcing ratio
     'teacher_forcing_end': 0.0,    # Final teacher forcing ratio
 
@@ -218,7 +218,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_p25',
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias',
 
     # Multi-task auxiliary prediction — TRIED AND REJECTED 2026-04-24:
     # lambda=0.1 → test MAE 20.200, RMSE 38.157. Smaller lambda also failed.

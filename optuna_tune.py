@@ -38,14 +38,14 @@ def build_trial_config(trial, args):
     config["learning_rate"] = trial.suggest_float("learning_rate", 8e-5, 3e-3, log=True)
     config["weight_decay"] = trial.suggest_float("weight_decay", 1e-7, 5e-4, log=True)
     config["batch_size"] = trial.suggest_categorical("batch_size", [32, 64])
-    config["hidden_dim"] = trial.suggest_categorical("hidden_dim", [64, 96])
+    config["hidden_dim"] = trial.suggest_categorical("hidden_dim", [64, 96, 128])
     config["dropout"] = trial.suggest_float("dropout", 0.0, 0.3)
 
     if config.get("model_type") == "graph_transformer":
         config["num_tf_layers"] = trial.suggest_int("num_tf_layers", 1, 3)
         config["num_heads"] = trial.suggest_categorical("num_heads", [4, 8])
         if config.get("graph_conv") == "gat":
-            config["num_gat_layers"] = trial.suggest_int("num_gat_layers", 1, 2)
+            config["num_gat_layers"] = 1  # 2-layer GAT rejected: over-smoothing, MAE 21.526 vs 21.184
     else:
         config["num_layers"] = trial.suggest_int("num_layers", 1, 2)
         # Teacher forcing only affects the autoregressive GCN-LSTM path.
@@ -63,9 +63,7 @@ def build_trial_config(trial, args):
         config["wind_direction_method"] = trial.suggest_categorical(
             "wind_direction_method", ["circular", "argmax_mean"]
         )
-        config["wind_normalization"] = trial.suggest_categorical(
-            "wind_normalization", ["row", "symmetric"]
-        )
+        config["wind_normalization"] = "row"  # symmetric rejected: row normalization is the permanent default
 
     # EVT-specific search only when using EVT loss
     if config.get("loss_type", "mse") == "evt_hybrid":
