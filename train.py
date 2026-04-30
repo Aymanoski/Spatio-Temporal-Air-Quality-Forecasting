@@ -35,12 +35,12 @@ CONFIG = {
     
     # Model architecture
     'input_dim': 33,        # Number of input features per node
-    'hidden_dim': 64,       # Hidden dimension
+    'hidden_dim': 96,       # Hidden dimension — Optuna best (64 was default, 96 tuned for GT+GAT)
     'output_dim': 1,        # Output dimension (PM2.5 only)
     'num_nodes': 12,        # Number of monitoring stations
     'num_layers': 2,        # Number of Graph LSTM layers
     'num_heads': 4,         # Attention heads
-    'dropout': 0.1,
+    'dropout': 0.137,       # Optuna best (was 0.1)
     'use_direct_decoding': False,  # Direct multi-horizon decoding (no autoregression)
     'use_attention': False,        # MHA tested and removed — zero measurable effect (2026-04-14)
 
@@ -119,8 +119,8 @@ CONFIG = {
 
     # Training
     'batch_size': 32,
-    'learning_rate': 1e-3,
-    'weight_decay': 1e-5,
+    'learning_rate': 0.000143,   # Optuna best — 7× lower than default 1e-3
+    'weight_decay': 1.32e-7,     # Optuna best (was 1e-5)
     'optimizer_type': 'adam',  # AdamW TRIED AND REJECTED 2026-04-24: alpha collapsed 0.64→0.16, test MAE 19.977 vs 19.813. Weight decay destabilizes learnable alpha gate.
     'epochs': 100,
     'patience': 15,          # patience=25 TRIED AND REJECTED 2026-04-29: best epoch still 7, no gain (MAE 19.799 vs 19.793). Model converges fast, patience is not the bottleneck.
@@ -131,9 +131,9 @@ CONFIG = {
     'loss_type': 'evt_hybrid',     # Options: 'mse', 'huber', or 'evt_hybrid'
     'evt_base_loss_type': 'mse',  # Huber TRIED AND REJECTED 2026-04-24: reduces gradient for large errors → alpha collapses → wind adjacency disabled → test MAE 19.977 vs 19.813
     'huber_delta': 1.0,            # SmoothL1 beta in normalized target space
-    'evt_lambda': 0.05,            # Base weight of EVT tail component (used if no schedule)
-    'evt_tail_quantile': 0.90,     # Threshold quantile for extremes
-    'evt_xi': 0.10,                # GPD shape parameter
+    'evt_lambda': 0.0558,          # Optuna best (was 0.05)
+    'evt_tail_quantile': 0.9173,   # Optuna best (was 0.90)
+    'evt_xi': 0.0633,              # Optuna best (was 0.10)
     'evt_threshold': None,
     'evt_threshold_mode': 'global',      # 'global' (single 90th pct) | 'per_node' TRIED AND REJECTED 2026-04-29: tie (MAE 19.775 vs 19.793, RMSE 37.428 vs 37.475)
 
@@ -192,15 +192,15 @@ CONFIG = {
 
     # Wind-aware adjacency
     'use_wind_adjacency': True,    # Use dynamic wind-aware adjacency
-    'wind_alpha': 0.6,             # Wind influence weight (0=distance-only, 1=wind-only)
+    'wind_alpha': 0.892,           # Optuna best — initial alpha gate value (was 0.6)
     'use_learnable_alpha_gate': True,  # Learn alpha instead of keeping wind_alpha fixed
     'use_node_embeddings': True,        # Learnable per-station identity embeddings (post-LN injection)
-    'distance_sigma': 1800,        # Distance decay parameter (calibrated for Beijing ~35km mean)
-    'wind_aggregation_mode': 'recent_weighted',  # 'recent_weighted' | 'last' | 'mean'
-    'wind_recency_beta': 3.0,      # Recency emphasis for recent_weighted aggregation
-    'wind_direction_method': 'circular',  # 'circular' | 'argmax_mean'
-    'wind_normalization': 'row',   # 'row' (directed) | 'symmetric'
-    'wind_calm_speed_threshold': 0.1,
+    'distance_sigma': 1486.5,      # Optuna best (was 1800 — shorter geographic decay)
+    'wind_aggregation_mode': 'recent_weighted',
+    'wind_recency_beta': 1.765,    # Optuna best (was 3.0 — less recency bias)
+    'wind_direction_method': 'argmax_mean',  # Optuna best (was 'circular')
+    'wind_normalization': 'row',
+    'wind_calm_speed_threshold': 0.324,  # Optuna best (was 0.1)
     'wind_speed_idx': 10,          # Index of wind speed feature (wspm) — unchanged by delta
     'wind_dir_start_idx': 17,      # Start index of wind direction one-hot (18 when use_pm25_delta=True)
     'wind_dir_end_idx': 33,        # End index of wind direction one-hot (34 when use_pm25_delta=True)
@@ -218,7 +218,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias',
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_optuna',
 
     # Multi-task auxiliary prediction — TRIED AND REJECTED 2026-04-24:
     # lambda=0.1 → test MAE 20.200, RMSE 38.157. Smaller lambda also failed.
