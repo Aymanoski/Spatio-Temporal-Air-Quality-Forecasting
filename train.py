@@ -19,6 +19,7 @@ from models import GCNLSTMModel, GraphTransformerModel, MeteorologicalForecaster
 from utils.graph import (
     build_wind_aware_adjacency_batch,
     build_dynamic_adjacency_gpu,
+    build_dual_channel_adjacency_gpu,
     build_per_timestep_adjacency_gpu,
     WIND_CATEGORIES
 )
@@ -218,7 +219,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_TCN',
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_dualchan',
 
     # Multi-task auxiliary prediction — TRIED AND REJECTED 2026-04-24:
     # lambda=0.1 → test MAE 20.200, RMSE 38.157. Smaller lambda also failed.
@@ -295,17 +296,24 @@ CONFIG = {
     'use_revin': False,
     'revin_feature_indices': [0],  # PM2.5 only
 
+    # Experiment: dual-channel spatial aggregation.
+    # Two independent GAT streams (distance and wind) instead of alpha-mixed single stream.
+    # Model cannot suppress wind by collapsing alpha — both channels always contribute.
+    # Requires graph_conv='gat'. The learnable alpha gate is bypassed (not used).
+    # Run name: append '_dualchan' to architecture_name.
+    'use_dual_channel_spatial': True,
+
     # Experiment: edge-conditioned GAT values.
     # Adds W_edge(adj_ij) to value aggregation so message content depends on the edge scalar.
     # W_edge is zero-init → starts identical to baseline GAT. Only active when graph_conv='gat'.
     # Run name: append '_edgefeat' to architecture_name.
-    'use_edge_features': False ,
+    'use_edge_features': False,
 
     # Experiment: TCN parallel branch alongside Transformer temporal encoder.
     # 4-layer dilated 1D TCN (dilations [1,2,4,8], kernel=3, receptive field=31h).
     # Fused additively with Transformer output via learned scalar gate init=0.0 → pure Transformer at start.
     # Run name: append '_tcn' to architecture_name.
-    'use_tcn_branch': True,
+    'use_tcn_branch': False,
 
     'hardware_tag': 'T4',       # Options: 'integrated_gpu', 'T4', 'rtx3090', etc.
     'use_versioned_checkpoint': True,       # If True, saves as <arch>_<hardware>_best.pt
@@ -1156,11 +1164,15 @@ def train_epoch(model, train_loader, optimizer, criterion, adj, config, teacher_
         optimizer.zero_grad()
 
         # Build dynamic adjacency if enabled
+        adj_wind_batch = None
         if use_wind_adj:
-            alpha_override = model.get_wind_alpha()
-            static_adj_override = model.get_static_adj() if getattr(model, 'use_learnable_static_adj', False) else None
-            adj_batch = build_dynamic_adjacency(X_batch, config, device, alpha_override=alpha_override,
-                                               static_adj_override=static_adj_override)
+            if config.get('use_dual_channel_spatial', False):
+                adj_batch, adj_wind_batch = build_dual_channel_adjacency_gpu(X_batch, config)
+            else:
+                alpha_override = model.get_wind_alpha()
+                static_adj_override = model.get_static_adj() if getattr(model, 'use_learnable_static_adj', False) else None
+                adj_batch = build_dynamic_adjacency(X_batch, config, device, alpha_override=alpha_override,
+                                                   static_adj_override=static_adj_override)
         else:
             adj_batch = adj
 
@@ -1185,6 +1197,7 @@ def train_epoch(model, train_loader, optimizer, criterion, adj, config, teacher_
             horizon=config['horizon'],
             teacher_forcing_ratio=teacher_forcing_ratio,
             future_met=Z_batch,
+            adj_wind=adj_wind_batch,
         )
         predictions = out[0]
         aux_preds = out[2] if len(out) > 2 else None  # (B, H, N, n_aux) or None
@@ -1282,11 +1295,15 @@ def validate(model, val_loader, criterion, adj, config, target_scaler=None, met_
             Z_batch = batch[2].to(device) if use_future_met and len(batch) > 2 else None
 
             # Build dynamic adjacency if enabled
+            adj_wind_batch = None
             if use_wind_adj:
-                alpha_override = model.get_wind_alpha()
-                static_adj_override = model.get_static_adj() if getattr(model, 'use_learnable_static_adj', False) else None
-                adj_batch = build_dynamic_adjacency(X_batch, config, device, alpha_override=alpha_override,
-                                                   static_adj_override=static_adj_override)
+                if config.get('use_dual_channel_spatial', False):
+                    adj_batch, adj_wind_batch = build_dual_channel_adjacency_gpu(X_batch, config)
+                else:
+                    alpha_override = model.get_wind_alpha()
+                    static_adj_override = model.get_static_adj() if getattr(model, 'use_learnable_static_adj', False) else None
+                    adj_batch = build_dynamic_adjacency(X_batch, config, device, alpha_override=alpha_override,
+                                                       static_adj_override=static_adj_override)
             else:
                 adj_batch = adj
 
@@ -1306,6 +1323,7 @@ def validate(model, val_loader, criterion, adj, config, target_scaler=None, met_
                 horizon=config['horizon'],
                 teacher_forcing_ratio=0.0,
                 future_met=Z_batch,
+                adj_wind=adj_wind_batch,
             )
             predictions = out[0]
 
@@ -1394,11 +1412,15 @@ def compute_metrics(model, test_loader, adj, config, target_scaler=None, met_for
             Z_batch = batch[2].to(device) if use_future_met and len(batch) > 2 else None
 
             # Build dynamic adjacency if enabled
+            adj_wind_batch = None
             if use_wind_adj:
-                alpha_override = model.get_wind_alpha()
-                static_adj_override = model.get_static_adj() if getattr(model, 'use_learnable_static_adj', False) else None
-                adj_batch = build_dynamic_adjacency(X_batch, config, device, alpha_override=alpha_override,
-                                                   static_adj_override=static_adj_override)
+                if config.get('use_dual_channel_spatial', False):
+                    adj_batch, adj_wind_batch = build_dual_channel_adjacency_gpu(X_batch, config)
+                else:
+                    alpha_override = model.get_wind_alpha()
+                    static_adj_override = model.get_static_adj() if getattr(model, 'use_learnable_static_adj', False) else None
+                    adj_batch = build_dynamic_adjacency(X_batch, config, device, alpha_override=alpha_override,
+                                                       static_adj_override=static_adj_override)
             else:
                 adj_batch = adj
 
@@ -1411,7 +1433,7 @@ def compute_metrics(model, test_loader, adj, config, target_scaler=None, met_for
 
             X_input = revin.normalize(X_batch) if revin is not None else X_batch
             predictions = model.predict(X_input, adj_batch, horizon=config['horizon'],
-                                        future_met=Z_batch)
+                                        future_met=Z_batch, adj_wind=adj_wind_batch)
 
             # Persistence residual: add last observed PM2.5 to model delta output
             if use_residual:
@@ -1709,6 +1731,7 @@ def train(config, trial=None):
             use_regime_conditioning=config.get('use_regime_conditioning', False),
             use_tcn_branch=config.get('use_tcn_branch', False),
             use_edge_features=config.get('use_edge_features', False),
+            use_dual_channel_spatial=config.get('use_dual_channel_spatial', False),
         ).to(device)
         print(f"  Model type: GraphTransformerModel  graph_conv={config.get('graph_conv', 'gcn')}  gat_version={config.get('gat_version', 'v1')}  num_gat_layers={config.get('num_gat_layers', 1)}  post_gat={config.get('use_post_temporal_gat', False)}  temporal_attn_head={config.get('use_temporal_attention_head', False)}")
     else:

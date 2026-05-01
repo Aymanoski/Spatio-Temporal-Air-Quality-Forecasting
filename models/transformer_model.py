@@ -131,6 +131,7 @@ class SpatioTemporalTransformerEncoder(nn.Module):
         n_local_layers: int = 1,
         use_tcn_branch: bool = False,
         use_edge_features: bool = False,
+        use_dual_channel_spatial: bool = False,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -140,6 +141,7 @@ class SpatioTemporalTransformerEncoder(nn.Module):
         self.return_full_sequence = return_full_sequence
         self.use_multiscale_temporal = use_multiscale_temporal
         self.use_tcn_branch = use_tcn_branch
+        self.use_dual_channel_spatial = use_dual_channel_spatial
 
         if ffn_dim is None:
             ffn_dim = hidden_dim * 2  # compact: 2× hidden, not the usual 4×
@@ -155,7 +157,24 @@ class SpatioTemporalTransformerEncoder(nn.Module):
             self.node_embed = None
 
         # --- Spatial layers ---
-        if graph_conv == 'gat':
+        if use_dual_channel_spatial:
+            # Two independent GAT streams: one for distance, one for wind.
+            # Each stream has its own parameters — neither can be suppressed by alpha.
+            # Output: h = h_dist + h_wind (additive, shared residual norm per layer).
+            assert graph_conv == 'gat', "use_dual_channel_spatial requires graph_conv='gat'"
+            self.gat_dist_layers = nn.ModuleList([
+                GraphAttentionLayer(hidden_dim, hidden_dim, dropout=dropout, version=gat_version)
+                for _ in range(num_gat_layers)
+            ])
+            self.gat_wind_layers = nn.ModuleList([
+                GraphAttentionLayer(hidden_dim, hidden_dim, dropout=dropout, version=gat_version)
+                for _ in range(num_gat_layers)
+            ])
+            self.gat_norms = nn.ModuleList([
+                nn.LayerNorm(hidden_dim) for _ in range(num_gat_layers)
+            ])
+            self.gat_layers = None  # not used in dual-channel mode
+        elif graph_conv == 'gat':
             # Stack of GAT layers, each with its own Pre-LN and residual.
             # Layer k aggregates k-hop neighbourhood information.
             self.gat_layers = nn.ModuleList([
@@ -233,11 +252,12 @@ class SpatioTemporalTransformerEncoder(nn.Module):
 
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, adj: torch.Tensor, **kwargs) -> torch.Tensor:
         """
         Args:
-            x:   (B, T, N, F)
-            adj: (N, N) static  or  (B, N, N) dynamic
+            x:        (B, T, N, F)
+            adj:      (N, N) static  or  (B, N, N) dynamic
+            adj_wind: (B, N, N) wind-only adjacency — required when use_dual_channel_spatial=True
         Returns:
             return_full_sequence=False: (B, N, H) — last-token summary per node
             return_full_sequence=True:  (B, N, T, H) — full temporal sequence per node
@@ -254,7 +274,28 @@ class SpatioTemporalTransformerEncoder(nn.Module):
             x = x + emb.unsqueeze(0).unsqueeze(0)       # broadcast over B, T
 
         # 3. Spatial aggregation (stacked GAT or single GCN, Pre-LN + residual per layer)
-        if self.graph_conv == 'gat':
+        if self.use_dual_channel_spatial:
+            # Dual-channel: adj = A_dist, adj_wind = A_wind (both (B, N, N)).
+            # Each has its own GAT; outputs are summed before the shared residual.
+            adj_wind = kwargs.get('adj_wind', None)
+            assert adj_wind is not None, "use_dual_channel_spatial=True requires adj_wind kwarg"
+
+            def _flatten(a):
+                if a.dim() == 2:
+                    return a.unsqueeze(0).expand(B * T, -1, -1)
+                return a.unsqueeze(1).expand(-1, T, -1, -1).reshape(B * T, N, N)
+
+            adj_dist_flat = _flatten(adj)
+            adj_wind_flat = _flatten(adj_wind)
+
+            for gat_d, gat_w, gat_norm in zip(self.gat_dist_layers, self.gat_wind_layers, self.gat_norms):
+                x_norm = gat_norm(x)                                          # (B, T, N, H)
+                x_flat = x_norm.reshape(B * T, N, self.hidden_dim)
+                h_dist = gat_d(x_flat, adj_dist_flat).reshape(B, T, N, self.hidden_dim)
+                h_wind = gat_w(x_flat, adj_wind_flat).reshape(B, T, N, self.hidden_dim)
+                x = x + h_dist + h_wind                                       # additive residual
+
+        elif self.graph_conv == 'gat':
             # Flatten adj to (B*T, N, N) so the GAT loop sees one matrix per
             # (sample, timestep) pair, regardless of how adj was constructed:
             #   (N, N)      — static: same graph for all B and T
@@ -684,6 +725,7 @@ class GraphTransformerModel(nn.Module):
         use_regime_conditioning: bool = False,
         use_tcn_branch: bool = False,
         use_edge_features: bool = False,
+        use_dual_channel_spatial: bool = False,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -793,6 +835,7 @@ class GraphTransformerModel(nn.Module):
             n_local_layers=n_local_layers,
             use_tcn_branch=use_tcn_branch,
             use_edge_features=use_edge_features,
+            use_dual_channel_spatial=use_dual_channel_spatial,
         )
 
         # Post-temporal spatial refinement (optional).
@@ -854,6 +897,7 @@ class GraphTransformerModel(nn.Module):
         horizon: int = 6,
         teacher_forcing_ratio: float = 0.0,
         future_met: torch.Tensor = None,
+        adj_wind: torch.Tensor = None,
     ):
         """
         Args:
@@ -862,13 +906,14 @@ class GraphTransformerModel(nn.Module):
             target, teacher_forcing_ratio: ignored — direct decoding only
             horizon:    forecast steps
             future_met: (B, horizon, N, F_met) or None — oracle future meteorology
+            adj_wind:   (B, N, N) wind-only adjacency — required when use_dual_channel_spatial=True
         Returns:
             predictions:     (B, horizon, N, output_dim)
             attention_weights: None  (kept for API compatibility)
         """
         # (B, N, H) when use_temporal_attention_head=False
         # (B, N, T, H) when use_temporal_attention_head=True
-        enc_out = self.encoder(x, adj)
+        enc_out = self.encoder(x, adj, adj_wind=adj_wind)
 
         # Post-temporal spatial refinement (only active when temporal_attention_head=False;
         # mutual exclusion is enforced in __init__).
@@ -893,18 +938,20 @@ class GraphTransformerModel(nn.Module):
         return predictions, None, aux_predictions
 
     def predict(self, x: torch.Tensor, adj: torch.Tensor, horizon: int = 6,
-                future_met: torch.Tensor = None) -> torch.Tensor:
+                future_met: torch.Tensor = None,
+                adj_wind: torch.Tensor = None) -> torch.Tensor:
         """
         Inference without teacher forcing.
 
         Args:
             future_met: (B, horizon, N, F_met) or None — oracle future meteorology
+            adj_wind:   (B, N, N) wind-only adjacency — required when use_dual_channel_spatial=True
         Returns:
             (B, horizon, N)  — squeezed output dimension
         """
         self.eval()
         with torch.no_grad():
-            enc_out = self.encoder(x, adj)
+            enc_out = self.encoder(x, adj, adj_wind=adj_wind)
             if self.use_post_temporal_gat:
                 h_norm = self.post_gat_norm(enc_out)
                 gat_out = self.post_gat(h_norm, adj)

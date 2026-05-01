@@ -921,6 +921,70 @@ def build_dynamic_adjacency_gpu(X_batch, config, alpha_override=None, sigma_over
     return adj_batch
 
 
+def build_dual_channel_adjacency_gpu(X_batch, config, sigma_override=None):
+    """
+    Return A_dist_norm and A_wind_norm as independent row-normalized matrices.
+
+    Used for dual-channel spatial aggregation: distance and wind streams are kept
+    separate so neither can be suppressed by an alpha gate.
+
+    Args:
+        X_batch: (batch, timesteps, num_nodes, features) tensor ON GPU
+        config:  configuration dict (same keys as build_dynamic_adjacency_gpu)
+        sigma_override: optional override for distance_sigma
+
+    Returns:
+        A_dist_norm: (batch, num_nodes, num_nodes) — distance-only channel
+        A_wind_norm: (batch, num_nodes, num_nodes) — wind-only channel
+    """
+    wind_speed_idx = config['wind_speed_idx']
+    wind_dir_start = config['wind_dir_start_idx']
+    wind_dir_end   = config['wind_dir_end_idx']
+
+    # Reconstruct raw wspm if StandardScaler was applied (same as build_dynamic_adjacency)
+    wspm_mean  = config.get('_wspm_mean',  0.0)
+    wspm_scale = config.get('_wspm_scale', 1.0)
+    if wspm_scale != 1.0 or wspm_mean != 0.0:
+        X_adj = X_batch.clone()
+        X_adj[:, :, :, wind_speed_idx] = (
+            X_batch[:, :, :, wind_speed_idx] * wspm_scale + wspm_mean
+        ).clamp(min=0.0)
+    else:
+        X_adj = X_batch
+
+    wind_speeds     = X_adj[:, :, :, wind_speed_idx]
+    wind_directions = X_adj[:, :, :, wind_dir_start:wind_dir_end]
+
+    agg_speeds, agg_angles = aggregate_wind_gpu(
+        wind_speeds,
+        wind_directions,
+        mode=config.get('wind_aggregation_mode', 'recent_weighted'),
+        recency_beta=config.get('wind_recency_beta', 3.0),
+        calm_speed_threshold=config.get('wind_calm_speed_threshold', 0.1),
+    )
+
+    _sigma = config['distance_sigma'] if sigma_override is None else sigma_override
+    _calm  = config.get('wind_calm_speed_threshold', 0.1)
+
+    # alpha=0 → pure distance channel (A_wind zeroed out)
+    A_dist_norm = build_wind_aware_adjacency_gpu(
+        agg_speeds, agg_angles,
+        alpha=0.0,
+        distance_sigma=_sigma,
+        calm_speed_threshold=_calm,
+    )  # (B, N, N)
+
+    # alpha=1 → pure wind channel (A_dist zeroed out)
+    A_wind_norm = build_wind_aware_adjacency_gpu(
+        agg_speeds, agg_angles,
+        alpha=1.0,
+        distance_sigma=_sigma,
+        calm_speed_threshold=_calm,
+    )  # (B, N, N)
+
+    return A_dist_norm, A_wind_norm
+
+
 def build_per_timestep_adjacency_gpu(X_batch, config, alpha_override=None, sigma_override=None):
     """
     Build a per-timestep wind-aware adjacency sequence from the input batch.
