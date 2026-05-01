@@ -218,7 +218,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias',
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_edgefeat',
 
     # Multi-task auxiliary prediction — TRIED AND REJECTED 2026-04-24:
     # lambda=0.1 → test MAE 20.200, RMSE 38.157. Smaller lambda also failed.
@@ -299,7 +299,7 @@ CONFIG = {
     # Adds W_edge(adj_ij) to value aggregation so message content depends on the edge scalar.
     # W_edge is zero-init → starts identical to baseline GAT. Only active when graph_conv='gat'.
     # Run name: append '_edgefeat' to architecture_name.
-    'use_edge_features': False,
+    'use_edge_features': True ,
 
     # Experiment: TCN parallel branch alongside Transformer temporal encoder.
     # 4-layer dilated 1D TCN (dilations [1,2,4,8], kernel=3, receptive field=31h).
