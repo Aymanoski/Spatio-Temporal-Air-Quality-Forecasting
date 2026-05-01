@@ -291,6 +291,10 @@ def build_model_from_config(config: dict[str, Any]) -> torch.nn.Module:
             n_aux_targets=int(config.get("n_aux_targets", 5)),
             use_station_horizon_bias=bool(config.get("use_station_horizon_bias", False)),
             use_regime_conditioning=bool(config.get("use_regime_conditioning", False)),
+            use_tcn_branch=bool(config.get("use_tcn_branch", False)),
+            use_edge_features=bool(config.get("use_edge_features", False)),
+            use_dual_channel_spatial=bool(config.get("use_dual_channel_spatial", False)),
+            use_probabilistic_output=bool(config.get("use_probabilistic_output", False)),
         )
 
     if model_type == "gcn_lstm":
@@ -985,6 +989,10 @@ def evaluate_checkpoint(
             "use_multitask": config.get("use_multitask", False),
             "use_station_horizon_bias": config.get("use_station_horizon_bias", False),
             "use_regime_conditioning": config.get("use_regime_conditioning", False),
+            "use_tcn_branch": config.get("use_tcn_branch", False),
+            "use_edge_features": config.get("use_edge_features", False),
+            "use_dual_channel_spatial": config.get("use_dual_channel_spatial", False),
+            "use_probabilistic_output": config.get("use_probabilistic_output", False),
             "use_future_met": config.get("use_future_met", False),
             "met_forecast_mode": config.get("met_forecast_mode"),
             "wind_direction_method": config.get("wind_direction_method"),

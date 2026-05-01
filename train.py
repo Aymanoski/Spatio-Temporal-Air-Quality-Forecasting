@@ -151,6 +151,14 @@ CONFIG = {
         'transition': 'smooth'  # 'smooth' for gradual, 'step' for abrupt changes
     },
 
+    # Probabilistic Gaussian NLL experiment (disabled by default).
+    # Adds a log-variance head and trains with Gaussian NLL, optionally plus the EVT
+    # tail MSE term when loss_type='gaussian_nll_evt'. predict()/metrics still use
+    # the mean forecast only.
+    'use_probabilistic_output': True,
+    'nll_logvar_min': -6.0,
+    'nll_logvar_max': 4.0,
+
     # Per-timestep dynamic adjacency.
     # When True, builds a separate A_t for each of the 24 input timesteps
     # using instantaneous wind conditions at that hour, instead of one
@@ -219,7 +227,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_dualchan',
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_probabilistic_nll_evt',  # descriptive name for this architecture/experiment — used in checkpoint naming
 
     # Multi-task auxiliary prediction — TRIED AND REJECTED 2026-04-24:
     # lambda=0.1 → test MAE 20.200, RMSE 38.157. Smaller lambda also failed.
@@ -301,7 +309,7 @@ CONFIG = {
     # Model cannot suppress wind by collapsing alpha — both channels always contribute.
     # Requires graph_conv='gat'. The learnable alpha gate is bypassed (not used).
     # Run name: append '_dualchan' to architecture_name.
-    'use_dual_channel_spatial': True,
+    'use_dual_channel_spatial': False,
 
     # Experiment: edge-conditioned GAT values.
     # Adds W_edge(adj_ij) to value aggregation so message content depends on the edge scalar.
@@ -471,6 +479,119 @@ class EVTHybridLoss(nn.Module):
 
         # Combine primary regression loss + weighted tail penalty
         return base_loss + self.lambda_tail * tail_loss
+
+
+def compute_evt_tail_loss(predictions, targets, threshold, xi=0.10, eps=1e-6,
+                          asymmetric_penalty=False, under_penalty_multiplier=2.0):
+    """Tail weighted squared error used by EVT hybrid objectives."""
+    thr = torch.as_tensor(threshold, dtype=targets.dtype, device=targets.device)
+    if thr.ndim == 0:
+        thr_view = thr
+    elif thr.ndim == 1:
+        thr_view = thr.view(1, 1, -1)
+    else:
+        raise ValueError(f"Unsupported threshold shape: {tuple(thr.shape)}")
+
+    mask = targets > thr_view
+    if not mask.any():
+        return torch.zeros(1, device=predictions.device, dtype=predictions.dtype)
+
+    extreme_preds = predictions[mask]
+    extreme_targets = targets[mask]
+    thr_selected = thr_view.expand_as(targets)[mask]
+    target_excess = extreme_targets - thr_selected
+    err = extreme_preds - extreme_targets
+    mean_excess = target_excess.mean().detach()
+    excess_weight = 1.0 + float(xi) * target_excess / (mean_excess + float(eps))
+    excess_weight = torch.clamp(excess_weight, min=1.0)
+
+    if asymmetric_penalty:
+        under_mask = err < 0
+        excess_weight = excess_weight * torch.where(
+            under_mask,
+            err.new_tensor(float(under_penalty_multiplier)),
+            err.new_tensor(1.0),
+        )
+
+    return (excess_weight * (err ** 2)).mean()
+
+
+class GaussianNLLForecastLoss(nn.Module):
+    """Gaussian negative log likelihood for mean/log-variance forecasts."""
+
+    requires_log_var = True
+
+    def __init__(self, logvar_min=-6.0, logvar_max=4.0, horizon_weights=None):
+        super().__init__()
+        self.logvar_min = float(logvar_min)
+        self.logvar_max = float(logvar_max)
+        if horizon_weights is not None:
+            hw = torch.as_tensor(horizon_weights, dtype=torch.float32)
+            hw = hw / hw.mean()
+            self.register_buffer("horizon_weights", hw)
+        else:
+            self.register_buffer("horizon_weights", None)
+
+    def forward(self, predictions, targets, log_vars):
+        log_vars = torch.clamp(log_vars, min=self.logvar_min, max=self.logvar_max)
+        per_element = 0.5 * (torch.exp(-log_vars) * (predictions - targets) ** 2 + log_vars)
+
+        if self.horizon_weights is not None:
+            horizon_count = predictions.shape[1]
+            weight_shape = [1] * per_element.ndim
+            weight_shape[1] = horizon_count
+            weights = self.horizon_weights.to(device=predictions.device, dtype=predictions.dtype)
+            per_element = per_element * weights[:horizon_count].view(*weight_shape)
+
+        return per_element.mean()
+
+
+class GaussianNLLEVTHybridLoss(nn.Module):
+    """Gaussian NLL for the mean plus the existing EVT tail MSE pressure."""
+
+    requires_log_var = True
+
+    def __init__(self, threshold, lambda_tail=0.05, xi=0.10, eps=1e-6,
+                 asymmetric_penalty=False, under_penalty_multiplier=2.0,
+                 horizon_weights=None, logvar_min=-6.0, logvar_max=4.0):
+        super().__init__()
+        self.nll = GaussianNLLForecastLoss(
+            logvar_min=logvar_min,
+            logvar_max=logvar_max,
+            horizon_weights=horizon_weights,
+        )
+        thr = torch.as_tensor(threshold, dtype=torch.float32)
+        self.register_buffer("threshold", thr)
+        self.lambda_tail = float(lambda_tail)
+        self.xi = float(xi)
+        self.eps = float(eps)
+        self.asymmetric_penalty = bool(asymmetric_penalty)
+        self.under_penalty_multiplier = float(under_penalty_multiplier)
+
+    def set_lambda(self, new_lambda):
+        self.lambda_tail = float(new_lambda)
+
+    def forward(self, predictions, targets, log_vars):
+        nll_loss = self.nll(predictions, targets, log_vars)
+        tail_loss = compute_evt_tail_loss(
+            predictions,
+            targets,
+            self.threshold,
+            xi=self.xi,
+            eps=self.eps,
+            asymmetric_penalty=self.asymmetric_penalty,
+            under_penalty_multiplier=self.under_penalty_multiplier,
+        )
+        return nll_loss + self.lambda_tail * tail_loss
+
+
+def compute_forecast_loss(criterion, predictions, targets, log_vars=None):
+    """Dispatch loss calls for deterministic and probabilistic criteria."""
+    if getattr(criterion, "requires_log_var", False):
+        if log_vars is None:
+            raise ValueError("Probabilistic loss requires log_vars from the model")
+        return criterion(predictions, targets, log_vars)
+    return criterion(predictions, targets)
 
 
 class RevIN:
@@ -1201,10 +1322,13 @@ def train_epoch(model, train_loader, optimizer, criterion, adj, config, teacher_
         )
         predictions = out[0]
         aux_preds = out[2] if len(out) > 2 else None  # (B, H, N, n_aux) or None
+        log_vars = out[3] if len(out) > 3 else None
 
         # predictions: (batch, horizon, num_nodes, 1)
         # Y_batch: (batch, horizon, num_nodes)
         predictions = predictions.squeeze(-1)
+        if log_vars is not None:
+            log_vars = log_vars.squeeze(-1)
 
         # Persistence residual: model outputs delta from last observed PM2.5.
         # Add the baseline so loss is computed on final predictions vs actual targets.
@@ -1242,7 +1366,7 @@ def train_epoch(model, train_loader, optimizer, criterion, adj, config, teacher_
             predictions = predictions + t24_alpha * y_t24.unsqueeze(1).expand_as(predictions)
 
         # Compute PM2.5 loss
-        loss = criterion(predictions, Y_batch)
+        loss = compute_forecast_loss(criterion, predictions, Y_batch, log_vars=log_vars)
 
         # Auxiliary multi-task loss: MSE on (PM10, SO2, NO2, CO, O3) predictions.
         # aux_preds: (B, H, N, n_aux),  Y_aux_batch: (B, H, N, n_aux)
@@ -1326,8 +1450,11 @@ def validate(model, val_loader, criterion, adj, config, target_scaler=None, met_
                 adj_wind=adj_wind_batch,
             )
             predictions = out[0]
+            log_vars = out[3] if len(out) > 3 else None
 
             predictions = predictions.squeeze(-1)
+            if log_vars is not None:
+                log_vars = log_vars.squeeze(-1)
 
             # Persistence residual: add last observed PM2.5 to model delta output
             if config.get('use_persistence_residual', False):
@@ -1363,7 +1490,7 @@ def validate(model, val_loader, criterion, adj, config, target_scaler=None, met_
                 predictions = predictions + t24_alpha * y_t24.unsqueeze(1).expand_as(predictions)
 
             # Val loss uses PM2.5 criterion only (aux excluded from early stopping signal)
-            loss = criterion(predictions, Y_batch)
+            loss = compute_forecast_loss(criterion, predictions, Y_batch, log_vars=log_vars)
             total_loss += loss.item()
 
             all_preds.append(predictions.cpu().numpy())
@@ -1732,6 +1859,7 @@ def train(config, trial=None):
             use_tcn_branch=config.get('use_tcn_branch', False),
             use_edge_features=config.get('use_edge_features', False),
             use_dual_channel_spatial=config.get('use_dual_channel_spatial', False),
+            use_probabilistic_output=config.get('use_probabilistic_output', False),
         ).to(device)
         print(f"  Model type: GraphTransformerModel  graph_conv={config.get('graph_conv', 'gcn')}  gat_version={config.get('gat_version', 'v1')}  num_gat_layers={config.get('num_gat_layers', 1)}  post_gat={config.get('use_post_temporal_gat', False)}  temporal_attn_head={config.get('use_temporal_attention_head', False)}")
     else:
@@ -1810,6 +1938,46 @@ def train(config, trial=None):
                 f"  Adaptive Lambda Schedule: {sched['initial']} -> {sched['mid']} -> {sched['final']} "
                 f"(warmup={sched['warmup_epochs']}, mid={sched['mid_epochs']}, {sched['transition']})"
             )
+    elif loss_type in {'gaussian_nll', 'gaussian_nll_evt'}:
+        if not config.get('use_probabilistic_output', False):
+            raise ValueError("Gaussian NLL losses require use_probabilistic_output=True")
+
+        if loss_type == 'gaussian_nll_evt':
+            if config.get('evt_use_lambda_schedule', False):
+                initial_lambda = config['evt_lambda_schedule']['initial']
+            else:
+                initial_lambda = config['evt_lambda']
+            criterion = GaussianNLLEVTHybridLoss(
+                threshold=config['evt_threshold'],
+                lambda_tail=initial_lambda,
+                xi=config['evt_xi'],
+                asymmetric_penalty=config.get('evt_asymmetric_penalty', False),
+                under_penalty_multiplier=config.get('evt_under_penalty_multiplier', 2.0),
+                horizon_weights=horizon_weights,
+                logvar_min=config.get('nll_logvar_min', -6.0),
+                logvar_max=config.get('nll_logvar_max', 4.0),
+            )
+            print(
+                f"  Loss: Gaussian NLL + EVT tail MSE "
+                f"(lambda={initial_lambda}, q={config['evt_tail_quantile']}, xi={config['evt_xi']}, "
+                f"logvar=[{config.get('nll_logvar_min', -6.0)}, {config.get('nll_logvar_max', 4.0)}])"
+            )
+        else:
+            criterion = GaussianNLLForecastLoss(
+                logvar_min=config.get('nll_logvar_min', -6.0),
+                logvar_max=config.get('nll_logvar_max', 4.0),
+                horizon_weights=horizon_weights,
+            )
+            print(
+                f"  Loss: Gaussian NLL "
+                f"(logvar=[{config.get('nll_logvar_min', -6.0)}, {config.get('nll_logvar_max', 4.0)}])"
+            )
+
+        if horizon_weights is not None:
+            import numpy as _np
+            hw_arr = _np.array(horizon_weights, dtype=float)
+            hw_norm = hw_arr / hw_arr.mean()
+            print(f"  Horizon weights (normalized): {[round(w, 3) for w in hw_norm.tolist()]}")
     elif loss_type in {'mse', 'huber'}:
         criterion = BaseForecastLoss(
             loss_type=loss_type,
@@ -1897,7 +2065,7 @@ def train(config, trial=None):
         start_time = time.time()
 
         # Update EVT lambda if using adaptive schedule
-        if config.get('loss_type', 'mse') == 'evt_hybrid' and config.get('evt_use_lambda_schedule', False):
+        if config.get('loss_type', 'mse') in {'evt_hybrid', 'gaussian_nll_evt'} and config.get('evt_use_lambda_schedule', False):
             new_lambda = get_evt_lambda_for_epoch(
                 epoch,
                 config['evt_lambda_schedule'],
@@ -1945,7 +2113,7 @@ def train(config, trial=None):
 
         # Display current lambda if using schedule
         lambda_str = ""
-        if config.get('loss_type', 'mse') == 'evt_hybrid' and config.get('evt_use_lambda_schedule', False):
+        if hasattr(criterion, 'lambda_tail') and config.get('evt_use_lambda_schedule', False):
             lambda_str = f"λ: {criterion.lambda_tail:.3f} | "
 
         scale_label = "µg/m³" if target_scaler is not None else "norm"

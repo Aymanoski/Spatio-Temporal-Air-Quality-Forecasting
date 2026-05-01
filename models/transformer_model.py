@@ -726,6 +726,7 @@ class GraphTransformerModel(nn.Module):
         use_tcn_branch: bool = False,
         use_edge_features: bool = False,
         use_dual_channel_spatial: bool = False,
+        use_probabilistic_output: bool = False,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -739,6 +740,7 @@ class GraphTransformerModel(nn.Module):
         self.use_learnable_static_adj = use_learnable_static_adj
         self.use_multitask = use_multitask
         self.use_station_horizon_bias = use_station_horizon_bias
+        self.use_probabilistic_output = use_probabilistic_output
 
         # Station × horizon output bias (Exp 4): 72 learnable scalars in normalized space.
         # Zero-init so training starts identical to baseline; learns per-(step,node) correction.
@@ -889,6 +891,24 @@ class GraphTransformerModel(nn.Module):
         else:
             self.aux_head = None
 
+        # Optional Gaussian NLL variance head. The main head still predicts the mean.
+        # predict() returns the mean only, keeping deterministic evaluation unchanged.
+        if use_probabilistic_output:
+            if use_temporal_attention_head:
+                raise ValueError("use_probabilistic_output is not supported with temporal_attention_head")
+            self.logvar_head = DirectHorizonHead(
+                hidden_dim=hidden_dim,
+                output_dim=1,
+                horizon=horizon,
+                dropout=dropout,
+                max_horizon=max(horizon, 24),
+                future_met_dim=future_met_dim,
+            )
+            nn.init.zeros_(self.logvar_head.fc2.weight)
+            nn.init.zeros_(self.logvar_head.fc2.bias)
+        else:
+            self.logvar_head = None
+
     def forward(
         self,
         x: torch.Tensor,
@@ -935,7 +955,8 @@ class GraphTransformerModel(nn.Module):
             predictions = predictions + self.station_horizon_bias.unsqueeze(0).unsqueeze(-1)  # (1, H, N, 1)
 
         aux_predictions = self.aux_head(enc_out, horizon) if self.use_multitask else None
-        return predictions, None, aux_predictions
+        log_vars = self.logvar_head(enc_out, horizon, future_met=future_met) if self.logvar_head is not None else None
+        return predictions, None, aux_predictions, log_vars
 
     def predict(self, x: torch.Tensor, adj: torch.Tensor, horizon: int = 6,
                 future_met: torch.Tensor = None,
