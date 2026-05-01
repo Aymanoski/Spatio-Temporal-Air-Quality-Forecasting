@@ -60,6 +60,42 @@ class TemporalPositionalEncoding(nn.Module):
         return self.dropout(x)
 
 
+class TemporalCNN(nn.Module):
+    """
+    Dilated 1D TCN parallel branch for temporal modeling.
+
+    4 layers with dilations [1, 2, 4, 8] and kernel_size=3 give a receptive field
+    of 31 timesteps, covering the full 24h lookback window.
+
+    Input/output: (B*N, T, H) — same shape as Transformer encoder output.
+    Used as a parallel branch alongside the Transformer; contributions are
+    scaled by a learned additive gate initialized to 0 (starts identical to baseline).
+    """
+
+    def __init__(self, hidden_dim: int, dropout: float = 0.1):
+        super().__init__()
+        self.layers = nn.ModuleList()
+        self.norms = nn.ModuleList()
+        for dilation in [1, 2, 4, 8]:
+            # padding=dilation keeps output length == input length for kernel_size=3
+            self.layers.append(
+                nn.Conv1d(hidden_dim, hidden_dim, kernel_size=3,
+                          padding=dilation, dilation=dilation)
+            )
+            self.norms.append(nn.LayerNorm(hidden_dim))
+        self.drop = nn.Dropout(dropout)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: (B*N, T, H)
+        for conv, norm in zip(self.layers, self.norms):
+            x_norm = norm(x)
+            # Conv1d expects (B*N, H, T)
+            out = F.gelu(conv(x_norm.transpose(1, 2)).transpose(1, 2))
+            out = self.drop(out)
+            x = x + out  # Pre-LN residual
+        return x  # (B*N, T, H)
+
+
 class SpatioTemporalTransformerEncoder(nn.Module):
     """
     Spatio-temporal encoder.
@@ -93,6 +129,8 @@ class SpatioTemporalTransformerEncoder(nn.Module):
         use_multiscale_temporal: bool = False,
         local_window: int = 6,
         n_local_layers: int = 1,
+        use_tcn_branch: bool = False,
+        use_edge_features: bool = False,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -101,6 +139,7 @@ class SpatioTemporalTransformerEncoder(nn.Module):
         self.graph_conv = graph_conv
         self.return_full_sequence = return_full_sequence
         self.use_multiscale_temporal = use_multiscale_temporal
+        self.use_tcn_branch = use_tcn_branch
 
         if ffn_dim is None:
             ffn_dim = hidden_dim * 2  # compact: 2× hidden, not the usual 4×
@@ -120,7 +159,8 @@ class SpatioTemporalTransformerEncoder(nn.Module):
             # Stack of GAT layers, each with its own Pre-LN and residual.
             # Layer k aggregates k-hop neighbourhood information.
             self.gat_layers = nn.ModuleList([
-                GraphAttentionLayer(hidden_dim, hidden_dim, dropout=dropout, version=gat_version)
+                GraphAttentionLayer(hidden_dim, hidden_dim, dropout=dropout,
+                                    version=gat_version, use_edge_features=use_edge_features)
                 for _ in range(num_gat_layers)
             ])
             self.gat_norms = nn.ModuleList([
@@ -178,6 +218,18 @@ class SpatioTemporalTransformerEncoder(nn.Module):
         else:
             self.local_transformer = None
             self.local_gate_logit = None
+
+        # --- TCN parallel branch ---
+        # Dilated 1D TCN run in parallel with the Transformer over (B*N, T, H).
+        # Fused additively: output = transformer_out + tcn_gate * tcn_out
+        # tcn_gate is a scalar parameter initialized to 0.0 so the branch contributes
+        # nothing at training start — identical to Transformer-only baseline.
+        if use_tcn_branch:
+            self.tcn = TemporalCNN(hidden_dim, dropout=dropout)
+            self.tcn_gate = nn.Parameter(torch.zeros(1))
+        else:
+            self.tcn = None
+            self.tcn_gate = None
 
         self.dropout = nn.Dropout(dropout)
 
@@ -242,6 +294,13 @@ class SpatioTemporalTransformerEncoder(nn.Module):
 
         # Global branch: full bidirectional attention over all T timesteps
         x_global = self.transformer(x)    # (B*N, T, H)
+
+        # TCN parallel branch: dilated convolutions over (B*N, T, H).
+        # Additive fusion: x_global + tcn_gate * tcn_out.
+        # tcn_gate=0.0 at init → starts identical to Transformer-only baseline.
+        if self.tcn is not None:
+            x_tcn = self.tcn(x)                                  # (B*N, T, H) — same PE input
+            x_global = x_global + self.tcn_gate * x_tcn
 
         if self.return_full_sequence:
             # Return all T token representations for attention-based heads.
@@ -623,6 +682,8 @@ class GraphTransformerModel(nn.Module):
         n_aux_targets: int = 5,
         use_station_horizon_bias: bool = False,
         use_regime_conditioning: bool = False,
+        use_tcn_branch: bool = False,
+        use_edge_features: bool = False,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -730,6 +791,8 @@ class GraphTransformerModel(nn.Module):
             use_multiscale_temporal=use_multiscale_temporal,
             local_window=local_window,
             n_local_layers=n_local_layers,
+            use_tcn_branch=use_tcn_branch,
+            use_edge_features=use_edge_features,
         )
 
         # Post-temporal spatial refinement (optional).

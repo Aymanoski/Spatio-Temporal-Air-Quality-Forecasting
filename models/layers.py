@@ -177,6 +177,7 @@ class GraphAttentionLayer(nn.Module):
         num_heads: int = None,
         dropout: float = 0.1,
         version: str = 'v1',
+        use_edge_features: bool = False,
     ):
         super().__init__()
 
@@ -197,6 +198,7 @@ class GraphAttentionLayer(nn.Module):
         self.num_heads = num_heads
         self.head_dim = out_features // num_heads
         self.version = version
+        self.use_edge_features = use_edge_features
 
         if version == 'v2':
             # Two separate projections: source and target nodes projected independently,
@@ -216,6 +218,14 @@ class GraphAttentionLayer(nn.Module):
         self.bias = nn.Parameter(torch.zeros(out_features))
         self.leaky_relu = nn.LeakyReLU(negative_slope=0.2)
         self.dropout = nn.Dropout(dropout)
+
+        # Edge-conditioned value projection: maps scalar adj weight → hidden_dim.
+        # Zero-init so training starts identical to baseline GAT.
+        if use_edge_features:
+            self.W_edge = nn.Linear(1, out_features, bias=False)
+            nn.init.zeros_(self.W_edge.weight)
+        else:
+            self.W_edge = None
 
     def forward(self, x: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
         """
@@ -281,7 +291,20 @@ class GraphAttentionLayer(nn.Module):
         # Weighted aggregation
         attn_w = attn_weights.permute(0, 3, 1, 2)     # (B, H, N_dst, N_src)
         Wh_p   = Wh_val.permute(0, 2, 1, 3)           # (B, H, N_src, D)
-        out = torch.matmul(attn_w, Wh_p)              # (B, H, N, D)
+        out = torch.matmul(attn_w, Wh_p)              # (B, H, N_dst, D)
+
+        # Edge-conditioned value addition: out_i += Σ_j α_ij * W_edge(adj_ij)
+        # Conditions the aggregated message on the edge scalar (wind+distance weight).
+        # W_edge is zero-init so this term starts at 0, identical to baseline.
+        if self.W_edge is not None:
+            # adj_b: (B, N_dst, N_src) — scalar edge weight per pair
+            edge_vals = self.W_edge(adj_b.unsqueeze(-1))          # (B, N_dst, N_src, out_features)
+            edge_vals = edge_vals.view(
+                adj_b.shape[0], N, N, self.num_heads, self.head_dim
+            )                                                       # (B, N_dst, N_src, H, D)
+            edge_vals_p = edge_vals.permute(0, 3, 1, 2, 4)        # (B, H, N_dst, N_src, D)
+            edge_out = (attn_w.unsqueeze(-1) * edge_vals_p).sum(dim=3)  # (B, H, N_dst, D)
+            out = out + edge_out
 
         out = out.permute(0, 2, 1, 3).reshape(B, N, self.out_features)
         out = out + self.bias

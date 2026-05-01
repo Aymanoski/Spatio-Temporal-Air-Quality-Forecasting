@@ -35,12 +35,12 @@ CONFIG = {
     
     # Model architecture
     'input_dim': 33,        # Number of input features per node
-    'hidden_dim': 96,       # Experiment: isolating hidden_dim=96 from Optuna (all other params baseline)
+    'hidden_dim': 64,       # hidden_dim=96 tested and rejected 2026-05-01: Optuna params are coupled (wind_alpha=0.892 requires low LR to avoid alpha collapse; with baseline LR=1e-3 alpha collapsed 0.893→0.183, MAE 20.846)
     'output_dim': 1,        # Output dimension (PM2.5 only)
     'num_nodes': 12,        # Number of monitoring stations
     'num_layers': 2,        # Number of Graph LSTM layers
     'num_heads': 4,         # Attention heads
-    'dropout': 0.137,
+    'dropout': 0.1,
     'use_direct_decoding': False,  # Direct multi-horizon decoding (no autoregression)
     'use_attention': False,        # MHA tested and removed — zero measurable effect (2026-04-14)
 
@@ -120,7 +120,7 @@ CONFIG = {
     # Training
     'batch_size': 32,
     'learning_rate': 1e-3,
-    'weight_decay': 1.32e-7,
+    'weight_decay': 1e-5,
     'optimizer_type': 'adam',  # AdamW TRIED AND REJECTED 2026-04-24: alpha collapsed 0.64→0.16, test MAE 19.977 vs 19.813. Weight decay destabilizes learnable alpha gate.
     'epochs': 100,
     'patience': 15,          # patience=25 TRIED AND REJECTED 2026-04-29: best epoch still 7, no gain (MAE 19.799 vs 19.793). Model converges fast, patience is not the bottleneck.
@@ -131,9 +131,9 @@ CONFIG = {
     'loss_type': 'evt_hybrid',     # Options: 'mse', 'huber', or 'evt_hybrid'
     'evt_base_loss_type': 'mse',  # Huber TRIED AND REJECTED 2026-04-24: reduces gradient for large errors → alpha collapses → wind adjacency disabled → test MAE 19.977 vs 19.813
     'huber_delta': 1.0,            # SmoothL1 beta in normalized target space
-    'evt_lambda': 0.0558,
-    'evt_tail_quantile': 0.9173,
-    'evt_xi': 0.0633,
+    'evt_lambda': 0.05,
+    'evt_tail_quantile': 0.90,
+    'evt_xi': 0.10,
     'evt_threshold': None,
     'evt_threshold_mode': 'global',      # 'global' (single 90th pct) | 'per_node' TRIED AND REJECTED 2026-04-29: tie (MAE 19.775 vs 19.793, RMSE 37.428 vs 37.475)
 
@@ -192,15 +192,15 @@ CONFIG = {
 
     # Wind-aware adjacency
     'use_wind_adjacency': True,    # Use dynamic wind-aware adjacency
-    'wind_alpha': 0.892,
+    'wind_alpha': 0.6,
     'use_learnable_alpha_gate': True,
     'use_node_embeddings': True,
-    'distance_sigma': 1486.5,
+    'distance_sigma': 1800,
     'wind_aggregation_mode': 'recent_weighted',
-    'wind_recency_beta': 1.765,
-    'wind_direction_method': 'argmax_mean',
+    'wind_recency_beta': 3.0,
+    'wind_direction_method': 'circular',
     'wind_normalization': 'row',
-    'wind_calm_speed_threshold': 0.324,
+    'wind_calm_speed_threshold': 0.1,
     'wind_speed_idx': 10,          # Index of wind speed feature (wspm) — unchanged by delta
     'wind_dir_start_idx': 17,      # Start index of wind direction one-hot (18 when use_pm25_delta=True)
     'wind_dir_end_idx': 33,        # End index of wind direction one-hot (34 when use_pm25_delta=True)
@@ -218,7 +218,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_optuna_nolr',
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias',
 
     # Multi-task auxiliary prediction — TRIED AND REJECTED 2026-04-24:
     # lambda=0.1 → test MAE 20.200, RMSE 38.157. Smaller lambda also failed.
@@ -294,6 +294,18 @@ CONFIG = {
     # Alpha stayed stable (0.34), so rejection is not an alpha-collapse issue.
     'use_revin': False,
     'revin_feature_indices': [0],  # PM2.5 only
+
+    # Experiment: edge-conditioned GAT values.
+    # Adds W_edge(adj_ij) to value aggregation so message content depends on the edge scalar.
+    # W_edge is zero-init → starts identical to baseline GAT. Only active when graph_conv='gat'.
+    # Run name: append '_edgefeat' to architecture_name.
+    'use_edge_features': False,
+
+    # Experiment: TCN parallel branch alongside Transformer temporal encoder.
+    # 4-layer dilated 1D TCN (dilations [1,2,4,8], kernel=3, receptive field=31h).
+    # Fused additively with Transformer output via learned scalar gate init=0.0 → pure Transformer at start.
+    # Run name: append '_tcn' to architecture_name.
+    'use_tcn_branch': False,
 
     'hardware_tag': 'T4',       # Options: 'integrated_gpu', 'T4', 'rtx3090', etc.
     'use_versioned_checkpoint': True,       # If True, saves as <arch>_<hardware>_best.pt
@@ -1695,6 +1707,8 @@ def train(config, trial=None):
             n_aux_targets=config.get('n_aux_targets', 5),
             use_station_horizon_bias=config.get('use_station_horizon_bias', False),
             use_regime_conditioning=config.get('use_regime_conditioning', False),
+            use_tcn_branch=config.get('use_tcn_branch', False),
+            use_edge_features=config.get('use_edge_features', False),
         ).to(device)
         print(f"  Model type: GraphTransformerModel  graph_conv={config.get('graph_conv', 'gcn')}  gat_version={config.get('gat_version', 'v1')}  num_gat_layers={config.get('num_gat_layers', 1)}  post_gat={config.get('use_post_temporal_gat', False)}  temporal_attn_head={config.get('use_temporal_attention_head', False)}")
     else:
