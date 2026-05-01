@@ -155,7 +155,7 @@ CONFIG = {
     # Adds a log-variance head and trains with Gaussian NLL, optionally plus the EVT
     # tail MSE term when loss_type='gaussian_nll_evt'. predict()/metrics still use
     # the mean forecast only.
-    'use_probabilistic_output': True,
+    'use_probabilistic_output': False,
     'nll_logvar_min': -6.0,
     'nll_logvar_max': 4.0,
 
@@ -227,7 +227,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_probabilistic_nll_evt',  # descriptive name for this architecture/experiment — used in checkpoint naming
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_pm25spatial',  # descriptive name for this architecture/experiment — used in checkpoint naming
 
     # Multi-task auxiliary prediction — TRIED AND REJECTED 2026-04-24:
     # lambda=0.1 → test MAE 20.200, RMSE 38.157. Smaller lambda also failed.
@@ -308,8 +308,19 @@ CONFIG = {
     # Two independent GAT streams (distance and wind) instead of alpha-mixed single stream.
     # Model cannot suppress wind by collapsing alpha — both channels always contribute.
     # Requires graph_conv='gat'. The learnable alpha gate is bypassed (not used).
-    # Run name: append '_dualchan' to architecture_name.
+    # TRIED AND REJECTED 2026-05-01: test MAE 20.405 / RMSE 39.305. Additive two-stream
+    # forces conflicting dist+wind priors; alpha gate's learned balance was load-bearing.
     'use_dual_channel_spatial': False,
+
+    # Experiment: PM2.5-only spatial path.
+    # GAT receives pm25_proj(x[:,:,:,0:1]) — PM2.5 feature projected separately to hidden_dim.
+    # Transformer still receives full 33-feature projection. GAT residual is added onto
+    # the full-feature path before temporal encoding. Hypothesis: spatial aggregation on
+    # clean PM2.5-only signal (not met-contaminated) improves extreme-event RMSE, motivated
+    # by STGATN (F=1 input, MAE 19.57 / RMSE 35 on same dataset/horizon).
+    # Wind adjacency unchanged — still guides who talks to whom.
+    # Requires graph_conv='gat'. Run name: append '_pm25spatial' to architecture_name.
+    'use_pm25_spatial_path': True,
 
     # Experiment: edge-conditioned GAT values.
     # Adds W_edge(adj_ij) to value aggregation so message content depends on the edge scalar.
@@ -1860,6 +1871,7 @@ def train(config, trial=None):
             use_edge_features=config.get('use_edge_features', False),
             use_dual_channel_spatial=config.get('use_dual_channel_spatial', False),
             use_probabilistic_output=config.get('use_probabilistic_output', False),
+            use_pm25_spatial_path=config.get('use_pm25_spatial_path', False),
         ).to(device)
         print(f"  Model type: GraphTransformerModel  graph_conv={config.get('graph_conv', 'gcn')}  gat_version={config.get('gat_version', 'v1')}  num_gat_layers={config.get('num_gat_layers', 1)}  post_gat={config.get('use_post_temporal_gat', False)}  temporal_attn_head={config.get('use_temporal_attention_head', False)}")
     else:

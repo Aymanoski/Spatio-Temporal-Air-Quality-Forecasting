@@ -132,6 +132,7 @@ class SpatioTemporalTransformerEncoder(nn.Module):
         use_tcn_branch: bool = False,
         use_edge_features: bool = False,
         use_dual_channel_spatial: bool = False,
+        use_pm25_spatial_path: bool = False,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -142,12 +143,23 @@ class SpatioTemporalTransformerEncoder(nn.Module):
         self.use_multiscale_temporal = use_multiscale_temporal
         self.use_tcn_branch = use_tcn_branch
         self.use_dual_channel_spatial = use_dual_channel_spatial
+        self.use_pm25_spatial_path = use_pm25_spatial_path
 
         if ffn_dim is None:
             ffn_dim = hidden_dim * 2  # compact: 2× hidden, not the usual 4×
 
         # --- Input projection ---
         self.input_proj = nn.Linear(input_dim, hidden_dim)
+
+        # --- PM2.5-only spatial projection (split-input path) ---
+        # GAT receives only the PM2.5 feature projected to hidden_dim; the Transformer
+        # still receives the full 33-feature projection.  This gives the spatial module
+        # a cleaner signal (pollution patterns only) while keeping full meteorological
+        # context for temporal encoding.
+        if use_pm25_spatial_path:
+            self.pm25_proj = nn.Linear(1, hidden_dim)
+        else:
+            self.pm25_proj = None
 
         # --- Node identity embeddings ---
         if use_node_embeddings:
@@ -265,9 +277,17 @@ class SpatioTemporalTransformerEncoder(nn.Module):
         B, T, N, _ = x.shape
 
         # 1. Input projection: (B, T, N, H)
-        x = self.input_proj(x)
+        # Split-input path: Transformer gets full 33-feature projection;
+        # GAT gets a separate PM2.5-only projection so spatial aggregation
+        # works on clean pollution-pattern features rather than met-mixed features.
+        if self.use_pm25_spatial_path:
+            x_spatial = self.pm25_proj(x[:, :, :, 0:1])  # (B, T, N, H) — PM2.5 only
+            x = self.input_proj(x)                        # (B, T, N, H) — full features
+        else:
+            x = self.input_proj(x)                        # (B, T, N, H)
+            x_spatial = x                                 # GAT uses same representation
 
-        # 2. Node embeddings — add learnable station identity
+        # 2. Node embeddings — add learnable station identity to Transformer path
         if self.node_embed is not None:
             node_ids = torch.arange(N, device=x.device)
             emb = self.node_embed(node_ids)             # (N, H)
@@ -309,10 +329,13 @@ class SpatioTemporalTransformerEncoder(nn.Module):
                 adj_flat = adj.reshape(B * T, N, N)
 
             for gat_layer, gat_norm in zip(self.gat_layers, self.gat_norms):
-                x_norm = gat_norm(x)                                         # (B, T, N, H)
-                x_flat = x_norm.reshape(B * T, N, self.hidden_dim)
+                # Pre-LN applied to the spatial input (PM2.5-only path or full path).
+                # Residual is always added onto x (full-feature Transformer input).
+                x_spatial_norm = gat_norm(x_spatial)                        # (B, T, N, H)
+                x_flat = x_spatial_norm.reshape(B * T, N, self.hidden_dim)
                 gat_out = gat_layer(x_flat, adj_flat).reshape(B, T, N, self.hidden_dim)
-                x = x + gat_out                                              # residual
+                x = x + gat_out                                              # residual onto full-feature path
+                x_spatial = x_spatial + gat_out                             # keep spatial path consistent
         else:
             # GCN: single layer, vectorised over all T via batched matmul
             x_norm = self.gcn_norm(x)                                        # (B, T, N, H)
@@ -727,6 +750,7 @@ class GraphTransformerModel(nn.Module):
         use_edge_features: bool = False,
         use_dual_channel_spatial: bool = False,
         use_probabilistic_output: bool = False,
+        use_pm25_spatial_path: bool = False,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -838,6 +862,7 @@ class GraphTransformerModel(nn.Module):
             use_tcn_branch=use_tcn_branch,
             use_edge_features=use_edge_features,
             use_dual_channel_spatial=use_dual_channel_spatial,
+            use_pm25_spatial_path=use_pm25_spatial_path,
         )
 
         # Post-temporal spatial refinement (optional).
