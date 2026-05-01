@@ -133,6 +133,7 @@ class SpatioTemporalTransformerEncoder(nn.Module):
         use_edge_features: bool = False,
         use_dual_channel_spatial: bool = False,
         use_pm25_spatial_path: bool = False,
+        use_temporal_first: bool = False,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -144,6 +145,7 @@ class SpatioTemporalTransformerEncoder(nn.Module):
         self.use_tcn_branch = use_tcn_branch
         self.use_dual_channel_spatial = use_dual_channel_spatial
         self.use_pm25_spatial_path = use_pm25_spatial_path
+        self.use_temporal_first = use_temporal_first
 
         if ffn_dim is None:
             ffn_dim = hidden_dim * 2  # compact: 2× hidden, not the usual 4×
@@ -294,7 +296,11 @@ class SpatioTemporalTransformerEncoder(nn.Module):
             x = x + emb.unsqueeze(0).unsqueeze(0)       # broadcast over B, T
 
         # 3. Spatial aggregation (stacked GAT or single GCN, Pre-LN + residual per layer)
-        if self.use_dual_channel_spatial:
+        # Skipped entirely when use_temporal_first=True — spatial runs post-Transformer instead
+        # (handled by GraphTransformerModel.post_gat after the encoder returns).
+        if self.use_temporal_first:
+            pass  # no pre-temporal spatial; Transformer encodes pure per-node features
+        elif self.use_dual_channel_spatial:
             # Dual-channel: adj = A_dist, adj_wind = A_wind (both (B, N, N)).
             # Each has its own GAT; outputs are summed before the shared residual.
             adj_wind = kwargs.get('adj_wind', None)
@@ -751,13 +757,15 @@ class GraphTransformerModel(nn.Module):
         use_dual_channel_spatial: bool = False,
         use_probabilistic_output: bool = False,
         use_pm25_spatial_path: bool = False,
+        use_temporal_first: bool = False,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.num_nodes = num_nodes
         self.horizon = horizon
         self.use_learnable_alpha_gate = use_learnable_alpha_gate
-        self.use_post_temporal_gat = use_post_temporal_gat
+        # temporal-first forces post-temporal GAT on (that IS the spatial step)
+        self.use_post_temporal_gat = use_post_temporal_gat or use_temporal_first
         self.use_temporal_attention_head = use_temporal_attention_head
         self.use_t24_residual = use_t24_residual
         self.use_horizon_residual_weights = use_horizon_residual_weights
@@ -765,6 +773,7 @@ class GraphTransformerModel(nn.Module):
         self.use_multitask = use_multitask
         self.use_station_horizon_bias = use_station_horizon_bias
         self.use_probabilistic_output = use_probabilistic_output
+        self.use_temporal_first = use_temporal_first
 
         # Station × horizon output bias (Exp 4): 72 learnable scalars in normalized space.
         # Zero-init so training starts identical to baseline; learns per-(step,node) correction.
@@ -863,6 +872,7 @@ class GraphTransformerModel(nn.Module):
             use_edge_features=use_edge_features,
             use_dual_channel_spatial=use_dual_channel_spatial,
             use_pm25_spatial_path=use_pm25_spatial_path,
+            use_temporal_first=use_temporal_first,
         )
 
         # Post-temporal spatial refinement (optional).
@@ -871,7 +881,7 @@ class GraphTransformerModel(nn.Module):
         # wind-aware adjacency used in the pre-temporal GAT.
         # Pre-LN + GAT + residual — identical pattern to the encoder's spatial step.
         # Ablation: set use_post_temporal_gat=False to recover the base model.
-        if use_post_temporal_gat:
+        if self.use_post_temporal_gat:  # True when use_post_temporal_gat OR use_temporal_first
             self.post_gat_norm = nn.LayerNorm(hidden_dim)
             self.post_gat = GraphAttentionLayer(
                 in_features=hidden_dim,

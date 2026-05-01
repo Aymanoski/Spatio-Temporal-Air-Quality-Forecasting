@@ -227,7 +227,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_pm25spatial',  # descriptive name for this architecture/experiment — used in checkpoint naming
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first',  # descriptive name for this architecture/experiment — used in checkpoint naming
 
     # Multi-task auxiliary prediction — TRIED AND REJECTED 2026-04-24:
     # lambda=0.1 → test MAE 20.200, RMSE 38.157. Smaller lambda also failed.
@@ -313,14 +313,19 @@ CONFIG = {
     'use_dual_channel_spatial': False,
 
     # Experiment: PM2.5-only spatial path.
-    # GAT receives pm25_proj(x[:,:,:,0:1]) — PM2.5 feature projected separately to hidden_dim.
-    # Transformer still receives full 33-feature projection. GAT residual is added onto
-    # the full-feature path before temporal encoding. Hypothesis: spatial aggregation on
-    # clean PM2.5-only signal (not met-contaminated) improves extreme-event RMSE, motivated
-    # by STGATN (F=1 input, MAE 19.57 / RMSE 35 on same dataset/horizon).
-    # Wind adjacency unchanged — still guides who talks to whom.
-    # Requires graph_conv='gat'. Run name: append '_pm25spatial' to architecture_name.
-    'use_pm25_spatial_path': True,
+    # TRIED AND REJECTED 2026-05-02: test MAE 20.340 / RMSE 38.841. Alpha partial collapse
+    # (0.512→0.288). Met features in GAT were providing useful context, not contaminating.
+    'use_pm25_spatial_path': False,
+
+    # Experiment: temporal-first ordering (Transformer → GAT).
+    # Motivation: STGATN architecture does per-node temporal encoding BEFORE spatial mixing.
+    # GAT operates on rich temporal summaries (H-dim vectors) rather than per-timestep
+    # projected features. Previous use_post_temporal_gat=True was spatial-first + post GAT
+    # (double spatial). This is pure temporal-first: no pre-temporal GAT at all.
+    # Implementation: encoder skips pre-temporal spatial block; post_gat is forced on.
+    # GAT receives last-token temporal summary (B, N, H) — compact per-node representation.
+    # Same wind adjacency used. Alpha gate still active.
+    'use_temporal_first': True,
 
     # Experiment: edge-conditioned GAT values.
     # Adds W_edge(adj_ij) to value aggregation so message content depends on the edge scalar.
@@ -1872,6 +1877,7 @@ def train(config, trial=None):
             use_dual_channel_spatial=config.get('use_dual_channel_spatial', False),
             use_probabilistic_output=config.get('use_probabilistic_output', False),
             use_pm25_spatial_path=config.get('use_pm25_spatial_path', False),
+            use_temporal_first=config.get('use_temporal_first', False),
         ).to(device)
         print(f"  Model type: GraphTransformerModel  graph_conv={config.get('graph_conv', 'gcn')}  gat_version={config.get('gat_version', 'v1')}  num_gat_layers={config.get('num_gat_layers', 1)}  post_gat={config.get('use_post_temporal_gat', False)}  temporal_attn_head={config.get('use_temporal_attention_head', False)}")
     else:
