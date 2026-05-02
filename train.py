@@ -56,7 +56,7 @@ CONFIG = {
     # 'gat' — GraphAttentionLayer: learned attention + wind-aware adjacency as additive bias
     'graph_conv': 'gat',
     'num_gat_layers': 1,   # Number of stacked GAT layers (1=1-hop, 2=2-hop neighbourhood)
-    'gat_version': 'v2',  # 'v1' = standard GAT, 'v2' = GATv2 (dynamic attention)
+    'gat_version': 'v1',  # 'v1' = standard GAT, 'v2' = GATv2 (dynamic attention)
     'use_post_temporal_gat': False,  # FAILED: Test MAE 21.022, destabilized training
     'use_temporal_attention_head': False,  # FAILED: Test MAE 21.353, full-sequence access doesn't help
 
