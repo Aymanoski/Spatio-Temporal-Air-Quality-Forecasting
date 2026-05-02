@@ -295,6 +295,8 @@ def build_model_from_config(config: dict[str, Any]) -> torch.nn.Module:
             use_edge_features=bool(config.get("use_edge_features", False)),
             use_dual_channel_spatial=bool(config.get("use_dual_channel_spatial", False)),
             use_probabilistic_output=bool(config.get("use_probabilistic_output", False)),
+            use_pm25_spatial_path=bool(config.get("use_pm25_spatial_path", False)),
+            use_temporal_first=bool(config.get("use_temporal_first", False)),
         )
 
     if model_type == "gcn_lstm":
@@ -529,6 +531,7 @@ def prepare_checkpoint_config(checkpoint: dict[str, Any], device: str) -> dict[s
             any(key.startswith("post_gat.") or key.startswith("post_gat_norm.") for key in state_dict),
         )
     )
+    config["use_temporal_first"] = bool(checkpoint_config.get("use_temporal_first", False))
     config["use_t24_residual"] = bool(
         checkpoint_config.get(
             "use_t24_residual",
@@ -879,8 +882,14 @@ def evaluate_checkpoint(
     data_path: Path,
     device: str,
     save_predictions: bool = False,
-    allow_partial_load: bool = True
+    allow_partial_load: bool = True,
+    split: str = "test",
 ) -> dict[str, Any]:
+    """
+    split: 'test' (default) or 'val' — which data split to evaluate on.
+           'val' is used by the SD-Calibrator to obtain validation predictions
+           without touching test data.
+    """
     checkpoint = torch.load(checkpoint_path, weights_only=False, map_location="cpu")
     config = prepare_checkpoint_config(checkpoint, device=device)
 
@@ -901,23 +910,27 @@ def evaluate_checkpoint(
     X_val, Y_val = val_data
     X_test, Y_test = test_data
 
+    # Select split to evaluate
+    X_eval, Y_eval = (X_val, Y_val) if split == "val" else (X_test, Y_test)
+
     feature_scaler, target_scaler, already_scaled = fit_scalers_on_train(X_train, Y_train, config)
     set_per_station_residual_tensors(config, feature_scaler, target_scaler, device)
 
     if already_scaled:
-        X_test_scaled = X_test.astype(np.float32)
-        Y_test_scaled = Y_test.astype(np.float32)
-        Z_test_scaled = None
+        X_eval_scaled = X_eval.astype(np.float32)
+        Y_eval_scaled = Y_eval.astype(np.float32)
+        Z_eval_scaled = None
     else:
-        X_test_scaled, Y_test_scaled = scale_data(X_test, Y_test, feature_scaler, target_scaler, config)
+        X_eval_scaled, Y_eval_scaled = scale_data(X_eval, Y_eval, feature_scaler, target_scaler, config)
 
-        # Scale future met test split if this checkpoint used oracle future meteorology
-        Z_test_scaled = None
+        # Scale future met for the selected split
+        Z_eval_scaled = None
         if config.get("use_future_met") and raw_Z is not None:
             n = len(aligned_X)
+            train_end = int(n * config["train_ratio"])
             val_end = int(n * (config["train_ratio"] + config["val_ratio"]))
-            Z_test_raw = raw_Z[val_end:]
-            Z_test_scaled = scale_future_met(Z_test_raw, feature_scaler, config)
+            Z_split_raw = raw_Z[train_end:val_end] if split == "val" else raw_Z[val_end:]
+            Z_eval_scaled = scale_future_met(Z_split_raw, feature_scaler, config)
 
     model, load_info = load_model_for_checkpoint(
         checkpoint_path=checkpoint_path,
@@ -927,11 +940,11 @@ def evaluate_checkpoint(
     )
 
     predictions_scaled = run_model_predictions(
-        model, X_test_scaled, adj, config, device=device, Z_test=Z_test_scaled
+        model, X_eval_scaled, adj, config, device=device, Z_test=Z_eval_scaled
     )
     predictions, targets, is_original_scale = inverse_transform_predictions(
         predictions_scaled,
-        Y_test_scaled,
+        Y_eval_scaled,
         target_scaler,
         use_log_transform=bool(config.get("use_log_transform", False)),
     )
@@ -1013,6 +1026,9 @@ def evaluate_checkpoint(
         "learned_wind_alpha": learned_alpha,
         "learned_distance_sigma": learned_sigma,
         "is_original_scale": is_original_scale,
+        "predictions": predictions,
+        "targets": targets,
+        "split": split,
         **metrics,
     }
 
