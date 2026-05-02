@@ -941,6 +941,7 @@ class GraphTransformerModel(nn.Module):
                 out_features=hidden_dim,
                 dropout=dropout,
                 version=gat_version,
+                use_edge_features=use_edge_features,
             )
         else:
             self.post_gat_norm = None

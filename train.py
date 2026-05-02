@@ -227,7 +227,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_geo',  # descriptive name for this architecture/experiment — used in checkpoint naming
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_edgefeat',  # descriptive name for this architecture/experiment — used in checkpoint naming
 
     # Multi-task auxiliary prediction — TRIED AND REJECTED 2026-04-24:
     # lambda=0.1 → test MAE 20.200, RMSE 38.157. Smaller lambda also failed.
@@ -326,13 +326,17 @@ CONFIG = {
     # GAT receives last-token temporal summary (B, N, H) — compact per-node representation.
     # Same wind adjacency used. Alpha gate still active.
     'use_temporal_first': True,
-    'use_geo_embeddings': True,
+    # TRIED AND REJECTED 2026-05-03: alpha collapsed 0.52→0.28, geo_bias in GAT attn
+    # competes with wind signal. MAE 19.806 RMSE 38.556 (temporal-first baseline: 19.489/37.271).
+    'use_geo_embeddings': False,
 
     # Experiment: edge-conditioned GAT values.
     # Adds W_edge(adj_ij) to value aggregation so message content depends on the edge scalar.
     # W_edge is zero-init → starts identical to baseline GAT. Only active when graph_conv='gat'.
-    # Run name: append '_edgefeat' to architecture_name.
-    'use_edge_features': False,
+    # Previously rejected on spatial-first (MAE 20.130). Retrying on temporal-first post-GAT
+    # where GAT receives temporally-enriched (B, N, H) summaries rather than raw features.
+    # Note: modifies value aggregation only, NOT attention logits → no alpha collapse risk.
+    'use_edge_features': True,
 
     # Experiment: TCN parallel branch alongside Transformer temporal encoder.
     # 4-layer dilated 1D TCN (dilations [1,2,4,8], kernel=3, receptive field=31h).
