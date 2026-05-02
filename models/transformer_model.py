@@ -39,6 +39,143 @@ from .layers import GraphAttentionLayer
 from utils.graph import STATIONS, haversine
 
 
+class TransportDelayModule(nn.Module):
+    """
+    Physics-informed transport delay feature injection.
+
+    For each (target i, source j) pair, computes the wind-driven transport delay:
+        tau_ij = dist_ij [km] / (wspm_j [m/s] * 3.6 + eps)   [hours = timestep units]
+
+    Retrieves delayed source features via linear interpolation over the lookback window,
+    and aggregates across source stations using the wind-aware adjacency.
+
+    Injection point: Post-Transformer fusion via cross-attention.
+    """
+
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dim: int,
+        num_nodes: int,
+        wind_speed_idx: int = 10,
+        wspm_mean: float = 0.0,
+        wspm_scale: float = 1.0,
+        max_delay_hours: float = 24.0,
+        wind_window: int = 4,
+    ):
+        super().__init__()
+        self.wind_speed_idx = wind_speed_idx
+        self.max_delay_hours = float(max_delay_hours)
+        self.wind_window = wind_window
+
+        # Scaler params so we can denormalize wspm back to raw m/s for physics
+        self.register_buffer('wspm_mean', torch.tensor(float(wspm_mean)))
+        self.register_buffer('wspm_scale', torch.tensor(float(wspm_scale)))
+
+        # Precompute pairwise distance matrix (N, N) in km
+        station_names = list(STATIONS.keys())
+        dist_matrix = np.zeros((num_nodes, num_nodes), dtype=np.float32)
+        for i in range(num_nodes):
+            for j in range(num_nodes):
+                if i != j:
+                    dist_matrix[i, j] = haversine(
+                        STATIONS[station_names[i]], STATIONS[station_names[j]]
+                    )
+        self.register_buffer('dist_km', torch.from_numpy(dist_matrix))  # (N, N)
+
+    def forward(self, x_raw: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x_raw: (B, T, N, F)  raw input before input_proj
+            adj:   (B, N, N) or (N, N)  wind-aware adjacency for aggregation weights
+        Returns:
+            (B, N, F)  delayed feature contribution in raw feature space
+        """
+        B, T, N, F = x_raw.shape
+        device = x_raw.device
+
+        # --- Step 1: Compute tau_ij ---
+        # Aggregate wspm over recent window, then denormalize to raw m/s
+        wind_w = min(self.wind_window, T)
+        wspm_scaled = x_raw[:, -wind_w:, :, self.wind_speed_idx]          # (B, wind_w, N)
+        wspm_raw = (
+            wspm_scaled.mean(dim=1) * self.wspm_scale + self.wspm_mean
+        ).clamp(min=0.0)                                                    # (B, N)
+
+        # tau[b, i, j] = dist[i,j] / (wspm_j [m/s] * 3.6 [→ km/h] + eps)
+        speed_kmh = wspm_raw * 3.6 + 1e-3                                  # (B, N), km/h
+        # dist_km: (N, N) → unsqueeze batch; speed: (B, N) → insert i-dim
+        tau = self.dist_km.unsqueeze(0) / speed_kmh.unsqueeze(1)           # (B, N, N)
+        tau = tau.clamp(0.0, self.max_delay_hours)
+
+        # --- Step 2: Linear interpolation over lookback window ---
+        # t_query[b,i,j] = fractional index of the delayed timestep for pair (i,j)
+        t_query = float(T - 1) - tau                                        # (B, N, N)
+        t0 = t_query.floor().long().clamp(0, T - 1)                        # (B, N, N)
+        t1 = (t0 + 1).clamp(0, T - 1)                                      # (B, N, N)
+        w1 = (t_query - t0.float()).unsqueeze(-1)                           # (B, N, N, 1)
+
+        # x_perm[b, j, t, f] = features of source j at time t
+        x_perm = x_raw.permute(0, 2, 1, 3)                                 # (B, N, T, F)
+
+        b_idx = torch.arange(B, device=device).view(B, 1, 1).expand(B, N, N)
+        j_idx = torch.arange(N, device=device).view(1, 1, N).expand(B, N, N)
+
+        X0 = x_perm[b_idx, j_idx, t0]                                      # (B, N, N, F)
+        X1 = x_perm[b_idx, j_idx, t1]                                      # (B, N, N, F)
+        X_delayed = (1.0 - w1) * X0 + w1 * X1                              # (B, N, N, F)
+
+        # --- Step 3: Aggregate over source stations j with wind adjacency weights ---
+        if adj.dim() == 2:
+            adj_w = adj.unsqueeze(0).expand(B, -1, -1)
+        else:
+            adj_w = adj                                                      # (B, N, N)
+
+        # X_delay[b, i, f] = sum_j  adj_w[b,i,j] * X_delayed[b,i,j,f]
+        X_delay = torch.einsum('bij,bijf->bif', adj_w, X_delayed)           # (B, N, F)
+
+        return X_delay                                                      # (B, N, F)
+
+
+class DelayCrossAttentionFusion(nn.Module):
+    """
+    Fuses delayed raw features into the temporal encoder summary using cross-attention.
+    Query: temporal summary (B, N, H)
+    Key/Val: projected delay features (B, N, H)
+    """
+
+    def __init__(self, input_dim: int, hidden_dim: int, num_heads: int = 4, dropout: float = 0.1):
+        super().__init__()
+        # Project raw delayed features to hidden dimension for k/v
+        self.delay_proj = nn.Linear(input_dim, hidden_dim)
+        
+        self.cross_attn = nn.MultiheadAttention(
+            embed_dim=hidden_dim, num_heads=num_heads, dropout=dropout, batch_first=True
+        )
+        self.norm = nn.LayerNorm(hidden_dim)
+        
+        # Zero-initialize the output projection of the self-attention layer
+        # so this module starts as unity/identity.
+        nn.init.zeros_(self.cross_attn.out_proj.weight)
+        nn.init.zeros_(self.cross_attn.out_proj.bias)
+        
+    def forward(self, h_temporal: torch.Tensor, z_delay_raw: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            h_temporal: (B, N, H) from Transformer encoder
+            z_delay_raw: (B, N, F) from TransportDelayModule
+        Returns:
+            fused_h: (B, N, H)
+        """
+        # Project delay features to hidden dim: (B, N, H)
+        z_proj = self.delay_proj(z_delay_raw)
+        
+        # Cross attention: query is temporal summary, key/value is delay features
+        attn_out, _ = self.cross_attn(query=h_temporal, key=z_proj, value=z_proj)
+        
+        return self.norm(h_temporal + attn_out)
+
+
 class TemporalPositionalEncoding(nn.Module):
     """Sinusoidal positional encoding for shape (batch, seq_len, hidden_dim)."""
 
@@ -135,6 +272,12 @@ class SpatioTemporalTransformerEncoder(nn.Module):
         use_pm25_spatial_path: bool = False,
         use_temporal_first: bool = False,
         use_geo_embeddings: bool = False,
+        use_transport_delay: bool = False,
+        wind_speed_idx: int = 10,
+        wspm_mean: float = 0.0,
+        wspm_scale: float = 1.0,
+        max_delay_hours: float = 24.0,
+        delay_wind_window: int = 4,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -148,6 +291,7 @@ class SpatioTemporalTransformerEncoder(nn.Module):
         self.use_pm25_spatial_path = use_pm25_spatial_path
         self.use_temporal_first = use_temporal_first
         self.use_geo_embeddings = use_geo_embeddings
+        self.use_transport_delay = use_transport_delay
 
         if ffn_dim is None:
             ffn_dim = hidden_dim * 2  # compact: 2× hidden, not the usual 4×
@@ -308,6 +452,30 @@ class SpatioTemporalTransformerEncoder(nn.Module):
 
         self.dropout = nn.Dropout(dropout)
 
+        # --- Transport delay module ---
+        # Computes tau_ij from wind speed, interpolates delayed features,
+        # aggregates with wind adj weights, projects to H. Zero-init → baseline-identical start.
+        if use_transport_delay:
+            self.transport_delay = TransportDelayModule(
+                input_dim=input_dim,
+                hidden_dim=hidden_dim,
+                num_nodes=num_nodes,
+                wind_speed_idx=wind_speed_idx,
+                wspm_mean=wspm_mean,
+                wspm_scale=wspm_scale,
+                max_delay_hours=max_delay_hours,
+                wind_window=delay_wind_window,
+            )
+            self.delay_fusion = DelayCrossAttentionFusion(
+                input_dim=input_dim,
+                hidden_dim=hidden_dim,
+                num_heads=num_heads,
+                dropout=dropout
+            )
+        else:
+            self.transport_delay = None
+            self.delay_fusion = None
+
     def forward(self, x: torch.Tensor, adj: torch.Tensor, **kwargs) -> torch.Tensor:
         """
         Args:
@@ -319,6 +487,9 @@ class SpatioTemporalTransformerEncoder(nn.Module):
             return_full_sequence=True:  (B, N, T, H) — full temporal sequence per node
         """
         B, T, N, _ = x.shape
+
+        # Capture raw input before projection for transport delay computation
+        x_raw = x  # (B, T, N, F) — read-only reference
 
         # 1. Input projection: (B, T, N, H)
         # Split-input path: Transformer gets full 33-feature projection;
@@ -440,8 +611,16 @@ class SpatioTemporalTransformerEncoder(nn.Module):
         else:
             # Last timestep: analogous to an LSTM's final hidden state.
             x_out = x_global[:, -1, :]                       # (B*N, H)
+            
+        x_out = x_out.reshape(B, N, self.hidden_dim)
+        
+        # Transport delay injection: Post-Transformer fusion
+        # Fuses target-specific delayed source information using cross-attention
+        if self.transport_delay is not None:
+            z_delay_raw = self.transport_delay(x_raw, adj)  # (B, N, F)
+            x_out = self.delay_fusion(x_out, z_delay_raw)   # (B, N, H)
 
-        return x_out.reshape(B, N, self.hidden_dim)
+        return x_out
 
 
 class MeteorologicalForecaster(nn.Module):
@@ -809,6 +988,12 @@ class GraphTransformerModel(nn.Module):
         use_pm25_spatial_path: bool = False,
         use_temporal_first: bool = False,
         use_geo_embeddings: bool = False,
+        use_transport_delay: bool = False,
+        wind_speed_idx: int = 10,
+        wspm_mean: float = 0.0,
+        wspm_scale: float = 1.0,
+        max_delay_hours: float = 24.0,
+        delay_wind_window: int = 4,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -926,6 +1111,12 @@ class GraphTransformerModel(nn.Module):
             use_pm25_spatial_path=use_pm25_spatial_path,
             use_temporal_first=use_temporal_first,
             use_geo_embeddings=use_geo_embeddings,
+            use_transport_delay=use_transport_delay,
+            wind_speed_idx=wind_speed_idx,
+            wspm_mean=wspm_mean,
+            wspm_scale=wspm_scale,
+            max_delay_hours=max_delay_hours,
+            delay_wind_window=delay_wind_window,
         )
 
         # Post-temporal spatial refinement (optional).

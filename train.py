@@ -227,7 +227,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v2_residual_log1p_all_std_stationbias_temporal_first',  # descriptive name for this architecture/experiment — used in checkpoint naming
+    'architecture_name': 'graph_transformer_gat_v2_residual_log1p_all_std_stationbias_temporal_first_tdelay',  # descriptive name for this architecture/experiment — used in checkpoint naming
 
     # Multi-task auxiliary prediction — TRIED AND REJECTED 2026-04-24:
     # lambda=0.1 → test MAE 20.200, RMSE 38.157. Smaller lambda also failed.
@@ -329,6 +329,16 @@ CONFIG = {
     # TRIED AND REJECTED 2026-05-03: alpha collapsed 0.52→0.28, geo_bias in GAT attn
     # competes with wind signal. MAE 19.806 RMSE 38.556 (temporal-first baseline: 19.489/37.271).
     'use_geo_embeddings': False,
+
+    # Experiment: physics-informed transport delay injection.
+    # For each (target i, source j) pair computes tau_ij = dist_ij / (wspm_j * 3.6 + eps) [hours].
+    # Interpolates delayed source features linearly, aggregates via wind adjacency weights,
+    # projects to hidden dim (zero-init), and adds to the last timestep hidden state before
+    # the Transformer encoder. Starts identical to baseline — gradient must push delay_proj.
+    # max_delay_hours: clamp tau to this; delay_wind_window: timesteps used to avg wspm.
+    'use_transport_delay': True,
+    'delay_max_hours': 24.0,
+    'delay_wind_window': 4,
 
     # Experiment: edge-conditioned GAT values.
     # Adds W_edge(adj_ij) to value aggregation so message content depends on the edge scalar.
@@ -1883,6 +1893,12 @@ def train(config, trial=None):
             use_pm25_spatial_path=config.get('use_pm25_spatial_path', False),
             use_temporal_first=config.get('use_temporal_first', False),
             use_geo_embeddings=config.get('use_geo_embeddings', False),
+            use_transport_delay=config.get('use_transport_delay', False),
+            wind_speed_idx=config.get('wind_speed_idx', 10),
+            wspm_mean=config.get('_wspm_mean', 0.0),
+            wspm_scale=config.get('_wspm_scale', 1.0),
+            max_delay_hours=config.get('delay_max_hours', 24.0),
+            delay_wind_window=config.get('delay_wind_window', 4),
         ).to(device)
         print(f"  Model type: GraphTransformerModel  graph_conv={config.get('graph_conv', 'gcn')}  gat_version={config.get('gat_version', 'v1')}  num_gat_layers={config.get('num_gat_layers', 1)}  post_gat={config.get('use_post_temporal_gat', False)}  temporal_attn_head={config.get('use_temporal_attention_head', False)}")
     else:
