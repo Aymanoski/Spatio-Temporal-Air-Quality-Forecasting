@@ -227,7 +227,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first',  # descriptive name for this architecture/experiment — used in checkpoint naming
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_geo',  # descriptive name for this architecture/experiment — used in checkpoint naming
 
     # Multi-task auxiliary prediction — TRIED AND REJECTED 2026-04-24:
     # lambda=0.1 → test MAE 20.200, RMSE 38.157. Smaller lambda also failed.
@@ -326,6 +326,7 @@ CONFIG = {
     # GAT receives last-token temporal summary (B, N, H) — compact per-node representation.
     # Same wind adjacency used. Alpha gate still active.
     'use_temporal_first': True,
+    'use_geo_embeddings': True,
 
     # Experiment: edge-conditioned GAT values.
     # Adds W_edge(adj_ij) to value aggregation so message content depends on the edge scalar.
@@ -1878,6 +1879,7 @@ def train(config, trial=None):
             use_probabilistic_output=config.get('use_probabilistic_output', False),
             use_pm25_spatial_path=config.get('use_pm25_spatial_path', False),
             use_temporal_first=config.get('use_temporal_first', False),
+            use_geo_embeddings=config.get('use_geo_embeddings', False),
         ).to(device)
         print(f"  Model type: GraphTransformerModel  graph_conv={config.get('graph_conv', 'gcn')}  gat_version={config.get('gat_version', 'v1')}  num_gat_layers={config.get('num_gat_layers', 1)}  post_gat={config.get('use_post_temporal_gat', False)}  temporal_attn_head={config.get('use_temporal_attention_head', False)}")
     else:

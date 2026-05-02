@@ -297,6 +297,7 @@ def build_model_from_config(config: dict[str, Any]) -> torch.nn.Module:
             use_probabilistic_output=bool(config.get("use_probabilistic_output", False)),
             use_pm25_spatial_path=bool(config.get("use_pm25_spatial_path", False)),
             use_temporal_first=bool(config.get("use_temporal_first", False)),
+            use_geo_embeddings=bool(config.get("use_geo_embeddings", False)),
         )
 
     if model_type == "gcn_lstm":

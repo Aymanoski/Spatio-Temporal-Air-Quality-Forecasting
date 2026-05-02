@@ -134,6 +134,7 @@ class SpatioTemporalTransformerEncoder(nn.Module):
         use_dual_channel_spatial: bool = False,
         use_pm25_spatial_path: bool = False,
         use_temporal_first: bool = False,
+        use_geo_embeddings: bool = False,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -146,6 +147,7 @@ class SpatioTemporalTransformerEncoder(nn.Module):
         self.use_dual_channel_spatial = use_dual_channel_spatial
         self.use_pm25_spatial_path = use_pm25_spatial_path
         self.use_temporal_first = use_temporal_first
+        self.use_geo_embeddings = use_geo_embeddings
 
         if ffn_dim is None:
             ffn_dim = hidden_dim * 2  # compact: 2× hidden, not the usual 4×
@@ -169,6 +171,46 @@ class SpatioTemporalTransformerEncoder(nn.Module):
             nn.init.normal_(self.node_embed.weight, mean=0.0, std=0.01)
         else:
             self.node_embed = None
+
+        # --- Geographic coordinate encoder ---
+        # Fourier-encodes (lat, lon) → MLP → (N, hidden_dim), fused additively with node_embed.
+        # geo_bias_proj maps normalized pairwise distances (N, N, 1) → (N, N, num_gat_heads),
+        # added to GAT attention logits before softmax — static geographic distance prior.
+        # Both are zero-initialized so training starts identical to the baseline.
+        if use_geo_embeddings:
+            station_names = list(STATIONS.keys())
+            coords = np.array([STATIONS[s] for s in station_names], dtype=np.float32)  # (N, 2)
+            coords_norm = (coords - coords.min(axis=0)) / (coords.max(axis=0) - coords.min(axis=0) + 1e-8)  # (N, 2)
+            num_freqs = 4
+            freqs = (2 ** np.arange(num_freqs, dtype=np.float32)) * np.pi  # (4,)
+            angles = coords_norm[:, :, None] * freqs[None, None, :]        # (N, 2, 4)
+            fourier = np.concatenate([np.sin(angles), np.cos(angles)], axis=-1).reshape(num_nodes, -1)  # (N, 16)
+            self.register_buffer('coord_fourier', torch.from_numpy(fourier))
+
+            fourier_dim = fourier.shape[1]
+            self.coord_mlp = nn.Sequential(
+                nn.Linear(fourier_dim, hidden_dim),
+                nn.GELU(),
+                nn.Linear(hidden_dim, hidden_dim),
+            )
+            nn.init.zeros_(self.coord_mlp[2].weight)
+            nn.init.zeros_(self.coord_mlp[2].bias)
+
+            dist_matrix = np.zeros((num_nodes, num_nodes), dtype=np.float32)
+            for i in range(num_nodes):
+                for j in range(num_nodes):
+                    if i != j:
+                        dist_matrix[i, j] = haversine(STATIONS[station_names[i]], STATIONS[station_names[j]])
+            dist_matrix /= dist_matrix.max() + 1e-8
+            self.register_buffer('dist_matrix_norm', torch.from_numpy(dist_matrix))
+
+            num_gat_heads = next(h for h in [4, 2, 1] if hidden_dim % h == 0)
+            self.geo_bias_proj = nn.Linear(1, num_gat_heads)
+            nn.init.zeros_(self.geo_bias_proj.weight)
+            nn.init.zeros_(self.geo_bias_proj.bias)
+        else:
+            self.coord_mlp = None
+            self.geo_bias_proj = None
 
         # --- Spatial layers ---
         if use_dual_channel_spatial:
@@ -293,7 +335,15 @@ class SpatioTemporalTransformerEncoder(nn.Module):
         if self.node_embed is not None:
             node_ids = torch.arange(N, device=x.device)
             emb = self.node_embed(node_ids)             # (N, H)
+            if self.coord_mlp is not None:
+                emb = emb + self.coord_mlp(self.coord_fourier)  # fuse geographic encoding
             x = x + emb.unsqueeze(0).unsqueeze(0)       # broadcast over B, T
+
+        # Precompute static geographic distance bias for GAT attention (None if disabled)
+        if self.geo_bias_proj is not None:
+            geo_bias = self.geo_bias_proj(self.dist_matrix_norm.unsqueeze(-1))  # (N, N, H)
+        else:
+            geo_bias = None
 
         # 3. Spatial aggregation (stacked GAT or single GCN, Pre-LN + residual per layer)
         # Skipped entirely when use_temporal_first=True — spatial runs post-Transformer instead
@@ -339,7 +389,7 @@ class SpatioTemporalTransformerEncoder(nn.Module):
                 # Residual is always added onto x (full-feature Transformer input).
                 x_spatial_norm = gat_norm(x_spatial)                        # (B, T, N, H)
                 x_flat = x_spatial_norm.reshape(B * T, N, self.hidden_dim)
-                gat_out = gat_layer(x_flat, adj_flat).reshape(B, T, N, self.hidden_dim)
+                gat_out = gat_layer(x_flat, adj_flat, geo_bias=geo_bias).reshape(B, T, N, self.hidden_dim)
                 x = x + gat_out                                              # residual onto full-feature path
                 x_spatial = x_spatial + gat_out                             # keep spatial path consistent
         else:
@@ -758,12 +808,14 @@ class GraphTransformerModel(nn.Module):
         use_probabilistic_output: bool = False,
         use_pm25_spatial_path: bool = False,
         use_temporal_first: bool = False,
+        use_geo_embeddings: bool = False,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.num_nodes = num_nodes
         self.horizon = horizon
         self.use_learnable_alpha_gate = use_learnable_alpha_gate
+        self.use_geo_embeddings = use_geo_embeddings
         # temporal-first forces post-temporal GAT on (that IS the spatial step)
         self.use_post_temporal_gat = use_post_temporal_gat or use_temporal_first
         self.use_temporal_attention_head = use_temporal_attention_head
@@ -873,6 +925,7 @@ class GraphTransformerModel(nn.Module):
             use_dual_channel_spatial=use_dual_channel_spatial,
             use_pm25_spatial_path=use_pm25_spatial_path,
             use_temporal_first=use_temporal_first,
+            use_geo_embeddings=use_geo_embeddings,
         )
 
         # Post-temporal spatial refinement (optional).
@@ -892,6 +945,25 @@ class GraphTransformerModel(nn.Module):
         else:
             self.post_gat_norm = None
             self.post_gat = None
+
+        # Geographic distance bias for post_gat (active in temporal-first mode).
+        # Zero-init so post_gat starts identical to baseline.
+        if use_geo_embeddings and self.use_post_temporal_gat:
+            station_names = list(STATIONS.keys())
+            n = len(station_names)
+            dist_matrix = np.zeros((n, n), dtype=np.float32)
+            for i in range(n):
+                for j in range(n):
+                    if i != j:
+                        dist_matrix[i, j] = haversine(STATIONS[station_names[i]], STATIONS[station_names[j]])
+            dist_matrix /= dist_matrix.max() + 1e-8
+            self.register_buffer('post_dist_matrix_norm', torch.from_numpy(dist_matrix))
+            num_post_gat_heads = next(h for h in [4, 2, 1] if hidden_dim % h == 0)
+            self.post_geo_bias_proj = nn.Linear(1, num_post_gat_heads)
+            nn.init.zeros_(self.post_geo_bias_proj.weight)
+            nn.init.zeros_(self.post_geo_bias_proj.bias)
+        else:
+            self.post_geo_bias_proj = None
 
         if use_temporal_attention_head:
             self.head = HorizonAttentionHead(
@@ -974,7 +1046,8 @@ class GraphTransformerModel(nn.Module):
         # mutual exclusion is enforced in __init__).
         if self.use_post_temporal_gat:
             h_norm = self.post_gat_norm(enc_out)   # Pre-LN: (B, N, H)
-            gat_out = self.post_gat(h_norm, adj)    # (B, N, H)
+            post_geo_bias = self.post_geo_bias_proj(self.post_dist_matrix_norm.unsqueeze(-1)) if self.post_geo_bias_proj is not None else None
+            gat_out = self.post_gat(h_norm, adj, geo_bias=post_geo_bias)    # (B, N, H)
             enc_out = enc_out + gat_out             # residual
 
         # Soft regime conditioning: inject last-observed PM2.5 directly into enc_out.
@@ -1010,7 +1083,8 @@ class GraphTransformerModel(nn.Module):
             enc_out = self.encoder(x, adj, adj_wind=adj_wind)
             if self.use_post_temporal_gat:
                 h_norm = self.post_gat_norm(enc_out)
-                gat_out = self.post_gat(h_norm, adj)
+                post_geo_bias = self.post_geo_bias_proj(self.post_dist_matrix_norm.unsqueeze(-1)) if self.post_geo_bias_proj is not None else None
+                gat_out = self.post_gat(h_norm, adj, geo_bias=post_geo_bias)
                 enc_out = enc_out + gat_out
             if self.regime_proj is not None and not self.use_temporal_attention_head:
                 pm25_last = x[:, -1, :, 0:1]

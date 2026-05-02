@@ -227,11 +227,12 @@ class GraphAttentionLayer(nn.Module):
         else:
             self.W_edge = None
 
-    def forward(self, x: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, adj: torch.Tensor, geo_bias: torch.Tensor = None) -> torch.Tensor:
         """
         Args:
-            x:   (B, N, in_features)
-            adj: (N, N) static  or  (B, N, N) dynamic — wind-aware normalized adjacency
+            x:        (B, N, in_features)
+            adj:      (N, N) static  or  (B, N, N) dynamic — wind-aware normalized adjacency
+            geo_bias: (N, N, H) optional static geographic distance bias, broadcast over B
         Returns:
             out: (B, N, out_features)
         """
@@ -283,6 +284,10 @@ class GraphAttentionLayer(nn.Module):
             adj_b.new_full(adj_b.shape, -1e9)
         )
         attn_scores = attn_scores + adj_bias.unsqueeze(-1)
+
+        if geo_bias is not None:
+            # geo_bias: (N, N, H) → (1, N, N, H) broadcast over batch
+            attn_scores = attn_scores + geo_bias.unsqueeze(0)
 
         # Softmax over source nodes, dropout
         attn_weights = F.softmax(attn_scores, dim=2)   # (B, N, N, H)
