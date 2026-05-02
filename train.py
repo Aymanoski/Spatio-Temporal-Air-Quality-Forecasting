@@ -56,7 +56,7 @@ CONFIG = {
     # 'gat' — GraphAttentionLayer: learned attention + wind-aware adjacency as additive bias
     'graph_conv': 'gat',
     'num_gat_layers': 1,   # Number of stacked GAT layers (1=1-hop, 2=2-hop neighbourhood)
-    'gat_version': 'v1',  # 'v1' = standard GAT, 'v2' = GATv2 (dynamic attention)
+    'gat_version': 'v2',  # 'v1' = standard GAT, 'v2' = GATv2 (dynamic attention)
     'use_post_temporal_gat': False,  # FAILED: Test MAE 21.022, destabilized training
     'use_temporal_attention_head': False,  # FAILED: Test MAE 21.353, full-sequence access doesn't help
 
@@ -227,7 +227,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_edgefeat',  # descriptive name for this architecture/experiment — used in checkpoint naming
+    'architecture_name': 'graph_transformer_gat_v2_residual_log1p_all_std_stationbias_temporal_first',  # descriptive name for this architecture/experiment — used in checkpoint naming
 
     # Multi-task auxiliary prediction — TRIED AND REJECTED 2026-04-24:
     # lambda=0.1 → test MAE 20.200, RMSE 38.157. Smaller lambda also failed.
@@ -333,10 +333,9 @@ CONFIG = {
     # Experiment: edge-conditioned GAT values.
     # Adds W_edge(adj_ij) to value aggregation so message content depends on the edge scalar.
     # W_edge is zero-init → starts identical to baseline GAT. Only active when graph_conv='gat'.
-    # Previously rejected on spatial-first (MAE 20.130). Retrying on temporal-first post-GAT
-    # where GAT receives temporally-enriched (B, N, H) summaries rather than raw features.
-    # Note: modifies value aggregation only, NOT attention logits → no alpha collapse risk.
-    'use_edge_features': True,
+    # TRIED AND REJECTED on spatial-first (MAE 20.130) and temporal-first post-GAT (MAE 19.455,
+    # statistical tie Δ−0.034 vs baseline 19.489). No useful signal in either position.
+    'use_edge_features': False,
 
     # Experiment: TCN parallel branch alongside Transformer temporal encoder.
     # 4-layer dilated 1D TCN (dilations [1,2,4,8], kernel=3, receptive field=31h).
