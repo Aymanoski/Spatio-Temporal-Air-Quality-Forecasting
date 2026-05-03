@@ -227,7 +227,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_transatt_v2',  # descriptive name for this architecture/experiment — used in checkpoint naming
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_12h',  # descriptive name for this architecture/experiment — used in checkpoint naming
 
     # Multi-task auxiliary prediction — TRIED AND REJECTED 2026-04-24:
     # lambda=0.1 → test MAE 20.200, RMSE 38.157. Smaller lambda also failed.
@@ -344,7 +344,7 @@ CONFIG = {
     # 6 horizon queries self-attend, then cross-attend to full T=24 encoder sequence.
     # Zero-init out_proj → starts at persistence baseline.
     # Mutually exclusive with use_temporal_attention_head.
-    'use_transatt_decoder': True,
+    'use_transatt_decoder': False,
     'transatt_num_heads': 2,
 
     # Experiment: edge-conditioned GAT values.
