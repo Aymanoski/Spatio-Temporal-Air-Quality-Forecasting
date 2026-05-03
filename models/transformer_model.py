@@ -139,41 +139,50 @@ class TransportDelayModule(nn.Module):
 
 class DelayCrossAttentionFusion(nn.Module):
     """
-    Fuses delayed raw features into the temporal encoder summary using cross-attention.
-    Query: temporal summary (B, N, H)
-    Key/Val: projected delay features (B, N, H)
+    Post-Transformer cross-attention fusion of temporal summary with delay context.
+
+    Pre-LN style (consistent with the rest of the model):
+      - norm_h normalizes the query (temporal summary) before attention
+      - norm_z normalizes the projected delay key/value before attention
+      - out_proj is zero-initialized → attn_out = 0 at init → returns h_temporal unchanged
+        This guarantees the module starts identical to the baseline.
+
+    query  = norm_h(H_last)     — what we want to enrich
+    key    = norm_z(delay_proj(Z_raw))  — delay context
+    value  = norm_z(delay_proj(Z_raw))
+
+    H_fused = H_last + cross_attn(query, key, value)   [residual, no final norm]
     """
 
-    def __init__(self, input_dim: int, hidden_dim: int, num_heads: int = 4, dropout: float = 0.1):
+    def __init__(self, input_dim: int, hidden_dim: int, num_heads: int = 4, dropout: float = 0.0):
         super().__init__()
-        # Project raw delayed features to hidden dimension for k/v
+        # Project raw delayed features (F) to hidden dim (H) for key/value
         self.delay_proj = nn.Linear(input_dim, hidden_dim)
-        
+
+        # Pre-LN: separate norms for query and key/value streams
+        self.norm_h = nn.LayerNorm(hidden_dim)
+        self.norm_z = nn.LayerNorm(hidden_dim)
+
         self.cross_attn = nn.MultiheadAttention(
             embed_dim=hidden_dim, num_heads=num_heads, dropout=dropout, batch_first=True
         )
-        self.norm = nn.LayerNorm(hidden_dim)
-        
-        # Zero-initialize the output projection of the self-attention layer
-        # so this module starts as unity/identity.
+        # Zero-init out_proj: attn_out = 0 at init → H_fused = H_last + 0 = H_last
         nn.init.zeros_(self.cross_attn.out_proj.weight)
         nn.init.zeros_(self.cross_attn.out_proj.bias)
-        
+
     def forward(self, h_temporal: torch.Tensor, z_delay_raw: torch.Tensor) -> torch.Tensor:
         """
         Args:
-            h_temporal: (B, N, H) from Transformer encoder
-            z_delay_raw: (B, N, F) from TransportDelayModule
+            h_temporal:  (B, N, H) — last-token summary from Transformer encoder
+            z_delay_raw: (B, N, F) — aggregated delayed features from TransportDelayModule
         Returns:
-            fused_h: (B, N, H)
+            (B, N, H) — fused representation; equals h_temporal at init
         """
-        # Project delay features to hidden dim: (B, N, H)
-        z_proj = self.delay_proj(z_delay_raw)
-        
-        # Cross attention: query is temporal summary, key/value is delay features
-        attn_out, _ = self.cross_attn(query=h_temporal, key=z_proj, value=z_proj)
-        
-        return self.norm(h_temporal + attn_out)
+        z_proj = self.delay_proj(z_delay_raw)                        # (B, N, H)
+        q = self.norm_h(h_temporal)                                   # Pre-LN on query
+        kv = self.norm_z(z_proj)                                      # Pre-LN on key/value
+        attn_out, _ = self.cross_attn(query=q, key=kv, value=kv)     # (B, N, H)
+        return h_temporal + attn_out                                   # residual, no final norm
 
 
 class TemporalPositionalEncoding(nn.Module):
