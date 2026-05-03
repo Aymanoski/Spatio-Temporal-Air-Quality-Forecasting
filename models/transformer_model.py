@@ -288,6 +288,7 @@ class SpatioTemporalTransformerEncoder(nn.Module):
         wspm_scale: float = 1.0,
         max_delay_hours: float = 24.0,
         delay_wind_window: int = 4,
+        use_node_specific_proj: bool = False,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -297,6 +298,7 @@ class SpatioTemporalTransformerEncoder(nn.Module):
         self.return_full_sequence = return_full_sequence
         self.return_encoder_sequence = return_encoder_sequence
         self.use_multiscale_temporal = use_multiscale_temporal
+        self.use_node_specific_proj = use_node_specific_proj
         self.use_tcn_branch = use_tcn_branch
         self.use_dual_channel_spatial = use_dual_channel_spatial
         self.use_pm25_spatial_path = use_pm25_spatial_path
@@ -308,7 +310,20 @@ class SpatioTemporalTransformerEncoder(nn.Module):
             ffn_dim = hidden_dim * 2  # compact: 2× hidden, not the usual 4×
 
         # --- Input projection ---
-        self.input_proj = nn.Linear(input_dim, hidden_dim)
+        # Node-specific: 12 independent F→H linear maps, one per station.
+        # Vectorized as (N, H, F) parameters; applied via einsum in forward.
+        # Adds N*(H*F + H) = 12*(64*33 + 64) = 25,344 params vs 2,176 for shared.
+        if use_node_specific_proj:
+            self.input_proj = None
+            self.node_proj_weight = nn.Parameter(torch.empty(num_nodes, hidden_dim, input_dim))
+            self.node_proj_bias = nn.Parameter(torch.zeros(num_nodes, hidden_dim))
+            nn.init.kaiming_uniform_(self.node_proj_weight, a=math.sqrt(5))
+            bound = 1.0 / math.sqrt(input_dim)
+            nn.init.uniform_(self.node_proj_bias, -bound, bound)
+        else:
+            self.input_proj = nn.Linear(input_dim, hidden_dim)
+            self.node_proj_weight = None
+            self.node_proj_bias = None
 
         # --- PM2.5-only spatial projection (split-input path) ---
         # GAT receives only the PM2.5 feature projected to hidden_dim; the Transformer
@@ -508,9 +523,15 @@ class SpatioTemporalTransformerEncoder(nn.Module):
         # works on clean pollution-pattern features rather than met-mixed features.
         if self.use_pm25_spatial_path:
             x_spatial = self.pm25_proj(x[:, :, :, 0:1])  # (B, T, N, H) — PM2.5 only
-            x = self.input_proj(x)                        # (B, T, N, H) — full features
+            if self.node_proj_weight is not None:
+                x = torch.einsum('btnf,nhf->btnh', x, self.node_proj_weight) + self.node_proj_bias
+            else:
+                x = self.input_proj(x)                    # (B, T, N, H) — full features
         else:
-            x = self.input_proj(x)                        # (B, T, N, H)
+            if self.node_proj_weight is not None:
+                x = torch.einsum('btnf,nhf->btnh', x, self.node_proj_weight) + self.node_proj_bias
+            else:
+                x = self.input_proj(x)                    # (B, T, N, H)
             x_spatial = x                                 # GAT uses same representation
 
         # 2. Node embeddings — add learnable station identity to Transformer path
@@ -1125,6 +1146,7 @@ class GraphTransformerModel(nn.Module):
         delay_wind_window: int = 4,
         use_transatt_decoder: bool = False,
         transatt_num_heads: int = 2,
+        use_node_specific_proj: bool = False,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -1239,6 +1261,7 @@ class GraphTransformerModel(nn.Module):
             gat_version=gat_version,
             return_full_sequence=use_temporal_attention_head,
             return_encoder_sequence=use_transatt_decoder,
+            use_node_specific_proj=use_node_specific_proj,
             use_multiscale_temporal=use_multiscale_temporal,
             local_window=local_window,
             n_local_layers=n_local_layers,
