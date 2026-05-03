@@ -227,7 +227,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first',  # descriptive name for this architecture/experiment — used in checkpoint naming
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_h1',  # descriptive name for this architecture/experiment — used in checkpoint naming
 
     # Multi-task auxiliary prediction — TRIED AND REJECTED 2026-04-24:
     # lambda=0.1 → test MAE 20.200, RMSE 38.157. Smaller lambda also failed.
@@ -1311,6 +1311,8 @@ def train_epoch(model, train_loader, optimizer, criterion, adj, config, teacher_
     for batch_idx, batch in enumerate(train_loader):
         X_batch = batch[0].to(device)
         Y_batch = batch[1].to(device)
+        if Y_batch.shape[1] > config['horizon']:
+            Y_batch = Y_batch[:, :config['horizon'], :]
         Z_batch = batch[2].to(device) if use_future_met and len(batch) > 2 else None
         Y_aux_batch = batch[y_aux_batch_idx].to(device) if use_multitask and len(batch) > y_aux_batch_idx else None
 
@@ -1457,6 +1459,8 @@ def validate(model, val_loader, criterion, adj, config, target_scaler=None, met_
         for batch in val_loader:
             X_batch = batch[0].to(device)
             Y_batch = batch[1].to(device)
+            if Y_batch.shape[1] > config['horizon']:
+                Y_batch = Y_batch[:, :config['horizon'], :]
             Z_batch = batch[2].to(device) if use_future_met and len(batch) > 2 else None
 
             # Build dynamic adjacency if enabled
@@ -1577,6 +1581,8 @@ def compute_metrics(model, test_loader, adj, config, target_scaler=None, met_for
         for batch in test_loader:
             X_batch = batch[0].to(device)
             Y_batch = batch[1]
+            if Y_batch.shape[1] > config['horizon']:
+                Y_batch = Y_batch[:, :config['horizon'], :]
             Z_batch = batch[2].to(device) if use_future_met and len(batch) > 2 else None
 
             # Build dynamic adjacency if enabled
