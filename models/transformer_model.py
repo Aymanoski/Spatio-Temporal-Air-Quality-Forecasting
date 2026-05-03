@@ -272,6 +272,7 @@ class SpatioTemporalTransformerEncoder(nn.Module):
         num_gat_layers: int = 1,
         gat_version: str = 'v1',
         return_full_sequence: bool = False,
+        return_encoder_sequence: bool = False,
         use_multiscale_temporal: bool = False,
         local_window: int = 6,
         n_local_layers: int = 1,
@@ -294,6 +295,7 @@ class SpatioTemporalTransformerEncoder(nn.Module):
         self.use_node_embeddings = use_node_embeddings
         self.graph_conv = graph_conv
         self.return_full_sequence = return_full_sequence
+        self.return_encoder_sequence = return_encoder_sequence
         self.use_multiscale_temporal = use_multiscale_temporal
         self.use_tcn_branch = use_tcn_branch
         self.use_dual_channel_spatial = use_dual_channel_spatial
@@ -607,6 +609,10 @@ class SpatioTemporalTransformerEncoder(nn.Module):
             # Shape: (B, N, T, H)
             return x_global.reshape(B, N, T, self.hidden_dim)
 
+        # TransAtt decoder needs both the full sequence and the last-token summary.
+        # Capture x_seq here before collapsing to last token.
+        x_seq = x_global.reshape(B, N, T, self.hidden_dim) if self.return_encoder_sequence else None
+
         # Multi-scale: fuse global last-token with local (recent window) last-token.
         # Both branches see the same PE-encoded input; local branch attends over
         # only the last `local_window` timesteps using a lighter 1-layer Transformer.
@@ -620,14 +626,17 @@ class SpatioTemporalTransformerEncoder(nn.Module):
         else:
             # Last timestep: analogous to an LSTM's final hidden state.
             x_out = x_global[:, -1, :]                       # (B*N, H)
-            
+
         x_out = x_out.reshape(B, N, self.hidden_dim)
-        
+
         # Transport delay injection: Post-Transformer fusion
         # Fuses target-specific delayed source information using cross-attention
         if self.transport_delay is not None:
             z_delay_raw = self.transport_delay(x_raw, adj)  # (B, N, F)
             x_out = self.delay_fusion(x_out, z_delay_raw)   # (B, N, H)
+
+        if self.return_encoder_sequence:
+            return x_out, x_seq  # (B, N, H), (B, N, T, H)
 
         return x_out
 
@@ -940,6 +949,121 @@ class HorizonAttentionHead(nn.Module):
         return out
 
 
+class TransAttDecoder(nn.Module):
+    """
+    Transformer-style multi-step decoder (TransAtt).
+
+    Replaces DirectHorizonHead when use_transatt_decoder=True.
+
+    For each node independently (B*N parallel streams):
+      1. Initialize horizon queries from post-GAT summary + learned step embeddings.
+      2. Pre-LN self-attention among H=6 queries (future steps interact with each other).
+      3. Pre-LN cross-attention from queries to full T=24 encoder sequence.
+      4. Pre-LN FFN.
+      5. Linear output projection (zero-initialized → starts at persistence baseline).
+
+    Input shapes:
+      enc_out: (B, N, H)    — post-GAT enriched last-token summary
+      x_seq:   (B, N, T, H) — full pre-GAT encoder sequence for cross-attention memory
+
+    Output: (B, horizon, N, output_dim)
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int,
+        output_dim: int = 1,
+        horizon: int = 6,
+        num_heads: int = 4,
+        dropout: float = 0.1,
+        max_horizon: int = 24,
+        ffn_dim: int = None,
+    ):
+        super().__init__()
+        self.horizon = horizon
+        self.max_horizon = max(horizon, max_horizon)
+        self.hidden_dim = hidden_dim
+        if ffn_dim is None:
+            ffn_dim = hidden_dim * 2
+
+        # One learnable query offset per forecast step; added to enc_out before attention.
+        self.step_queries = nn.Parameter(torch.empty(self.max_horizon, hidden_dim))
+        nn.init.xavier_uniform_(self.step_queries)
+
+        # Self-attention: horizon queries interact with each other (Pre-LN)
+        self.self_attn_norm = nn.LayerNorm(hidden_dim)
+        self.self_attn = nn.MultiheadAttention(
+            hidden_dim, num_heads, dropout=dropout, batch_first=True
+        )
+
+        # Cross-attention: queries attend to full T encoder sequence (Pre-LN)
+        self.cross_attn_norm = nn.LayerNorm(hidden_dim)
+        self.cross_attn = nn.MultiheadAttention(
+            hidden_dim, num_heads, dropout=dropout, batch_first=True
+        )
+
+        # FFN (Pre-LN)
+        self.ffn_norm = nn.LayerNorm(hidden_dim)
+        self.ffn_fc1 = nn.Linear(hidden_dim, ffn_dim)
+        self.ffn_fc2 = nn.Linear(ffn_dim, hidden_dim)
+
+        # Zero-initialized output projection: at init all predictions = 0.
+        # With persistence residual added externally, this gives persistence baseline start.
+        self.out_proj = nn.Linear(hidden_dim, output_dim)
+        nn.init.zeros_(self.out_proj.weight)
+        nn.init.zeros_(self.out_proj.bias)
+
+        self.drop = nn.Dropout(dropout)
+
+    def forward(
+        self,
+        enc_out: torch.Tensor,
+        x_seq: torch.Tensor,
+        horizon: int = None,
+        future_met: torch.Tensor = None,  # unused, kept for API symmetry
+    ) -> torch.Tensor:
+        """
+        Args:
+            enc_out: (B, N, H)    — post-GAT enriched summary
+            x_seq:   (B, N, T, H) — full encoder sequence as cross-attention memory
+            horizon: optional override (must be <= max_horizon)
+        Returns:
+            (B, horizon, N, output_dim)
+        """
+        if horizon is None:
+            horizon = self.horizon
+
+        B, N, H = enc_out.shape
+        T = x_seq.shape[2]
+        BN = B * N
+
+        # Queries: enc_out (spatially enriched) + per-step learned offset
+        # (B, N, H) → (B, N, 1, H) + (1, 1, horizon, H) → (B, N, horizon, H)
+        q = enc_out.unsqueeze(2) + self.step_queries[:horizon].view(1, 1, horizon, H)
+        q = q.reshape(BN, horizon, H)       # (B*N, horizon, H)
+        mem = x_seq.reshape(BN, T, H)       # (B*N, T, H)
+
+        # Self-attention (Pre-LN): horizon queries share information
+        q_norm = self.self_attn_norm(q)
+        sa_out, _ = self.self_attn(q_norm, q_norm, q_norm)
+        q = q + self.drop(sa_out)
+
+        # Cross-attention (Pre-LN): each query attends to full temporal sequence
+        q_norm = self.cross_attn_norm(q)
+        ca_out, _ = self.cross_attn(q_norm, mem, mem)
+        q = q + self.drop(ca_out)
+
+        # FFN (Pre-LN)
+        q_norm = self.ffn_norm(q)
+        q = q + self.drop(self.ffn_fc2(self.drop(F.gelu(self.ffn_fc1(q_norm)))))
+
+        # Output projection (zero-init)
+        out = self.out_proj(q)                          # (B*N, horizon, output_dim)
+        out = out.reshape(B, N, horizon, -1)
+        out = out.permute(0, 2, 1, 3)                  # (B, horizon, N, output_dim)
+        return out
+
+
 class GraphTransformerModel(nn.Module):
     """
     Lightweight spatio-temporal Transformer for PM2.5 forecasting.
@@ -1003,6 +1127,7 @@ class GraphTransformerModel(nn.Module):
         wspm_scale: float = 1.0,
         max_delay_hours: float = 24.0,
         delay_wind_window: int = 4,
+        use_transatt_decoder: bool = False,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -1010,6 +1135,7 @@ class GraphTransformerModel(nn.Module):
         self.horizon = horizon
         self.use_learnable_alpha_gate = use_learnable_alpha_gate
         self.use_geo_embeddings = use_geo_embeddings
+        self.use_transatt_decoder = use_transatt_decoder
         # temporal-first forces post-temporal GAT on (that IS the spatial step)
         self.use_post_temporal_gat = use_post_temporal_gat or use_temporal_first
         self.use_temporal_attention_head = use_temporal_attention_head
@@ -1066,6 +1192,10 @@ class GraphTransformerModel(nn.Module):
                 "use_temporal_attention_head and use_post_temporal_gat are mutually exclusive: "
                 "post_gat requires (B, N, H) but temporal_attention_head uses (B, N, T, H)."
             )
+        if use_transatt_decoder and use_temporal_attention_head:
+            raise ValueError(
+                "use_transatt_decoder and use_temporal_attention_head are mutually exclusive."
+            )
 
         # Learnable alpha gate for wind/distance mixing in adjacency construction
         if use_learnable_alpha_gate:
@@ -1111,6 +1241,7 @@ class GraphTransformerModel(nn.Module):
             num_gat_layers=num_gat_layers,
             gat_version=gat_version,
             return_full_sequence=use_temporal_attention_head,
+            return_encoder_sequence=use_transatt_decoder,
             use_multiscale_temporal=use_multiscale_temporal,
             local_window=local_window,
             n_local_layers=n_local_layers,
@@ -1166,7 +1297,16 @@ class GraphTransformerModel(nn.Module):
         else:
             self.post_geo_bias_proj = None
 
-        if use_temporal_attention_head:
+        if use_transatt_decoder:
+            self.head = TransAttDecoder(
+                hidden_dim=hidden_dim,
+                output_dim=output_dim,
+                horizon=horizon,
+                num_heads=num_heads,
+                dropout=dropout,
+                max_horizon=max(horizon, 24),
+            )
+        elif use_temporal_attention_head:
             self.head = HorizonAttentionHead(
                 hidden_dim=hidden_dim,
                 output_dim=output_dim,
@@ -1239,9 +1379,13 @@ class GraphTransformerModel(nn.Module):
             predictions:     (B, horizon, N, output_dim)
             attention_weights: None  (kept for API compatibility)
         """
-        # (B, N, H) when use_temporal_attention_head=False
-        # (B, N, T, H) when use_temporal_attention_head=True
-        enc_out = self.encoder(x, adj, adj_wind=adj_wind)
+        # Encoder returns (B, N, H) normally; (B, N, T, H) for temporal_attention_head;
+        # (x_out (B,N,H), x_seq (B,N,T,H)) tuple for transatt_decoder.
+        if self.use_transatt_decoder:
+            enc_out, x_seq = self.encoder(x, adj, adj_wind=adj_wind)
+        else:
+            enc_out = self.encoder(x, adj, adj_wind=adj_wind)
+            x_seq = None
 
         # Post-temporal spatial refinement (only active when temporal_attention_head=False;
         # mutual exclusion is enforced in __init__).
@@ -1257,7 +1401,10 @@ class GraphTransformerModel(nn.Module):
             pm25_last = x[:, -1, :, 0:1]                       # (B, N, 1) normalized
             enc_out = enc_out + self.regime_proj(pm25_last)     # (B, N, H)
 
-        predictions = self.head(enc_out, horizon, future_met=future_met)  # (B, horizon, N, output_dim)
+        if self.use_transatt_decoder:
+            predictions = self.head(enc_out, x_seq, horizon)   # (B, horizon, N, output_dim)
+        else:
+            predictions = self.head(enc_out, horizon, future_met=future_met)  # (B, horizon, N, output_dim)
 
         # Station × horizon output bias: additive correction in normalized prediction space.
         if self.station_horizon_bias is not None:
