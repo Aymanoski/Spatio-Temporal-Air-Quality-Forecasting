@@ -32,7 +32,7 @@ CONFIG = {
     # Data
     'data_path': 'data/processed/',
     'input_len': 24,        # Lookback window (hours)
-    'horizon': 6,           # Prediction horizon (hours)
+    'horizon': 1,           # Prediction horizon (hours)
     
     # Model architecture
     'input_dim': 33,        # Number of input features per node
@@ -227,7 +227,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_seed123',  # descriptive name for this architecture/experiment — used in checkpoint naming
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first,  # descriptive name for this architecture/experiment — used in checkpoint naming
 
     # Multi-task auxiliary prediction — TRIED AND REJECTED 2026-04-24:
     # lambda=0.1 → test MAE 20.200, RMSE 38.157. Smaller lambda also failed.
@@ -371,7 +371,7 @@ CONFIG = {
     'resume': False,        # Set to True to resume from checkpoint
 
     # Reproducibility
-    'seed': 123,
+    'seed': 42,
     'deterministic': False,
 
     # Runtime controls (useful for hyperparameter tuning)
