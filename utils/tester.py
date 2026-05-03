@@ -298,6 +298,8 @@ def build_model_from_config(config: dict[str, Any]) -> torch.nn.Module:
             use_pm25_spatial_path=bool(config.get("use_pm25_spatial_path", False)),
             use_temporal_first=bool(config.get("use_temporal_first", False)),
             use_geo_embeddings=bool(config.get("use_geo_embeddings", False)),
+            use_transatt_decoder=bool(config.get("use_transatt_decoder", False)),
+            transatt_num_heads=int(config.get("transatt_num_heads", 2)),
         )
 
     if model_type == "gcn_lstm":
@@ -533,6 +535,12 @@ def prepare_checkpoint_config(checkpoint: dict[str, Any], device: str) -> dict[s
         )
     )
     config["use_temporal_first"] = bool(checkpoint_config.get("use_temporal_first", False))
+    config["use_transatt_decoder"] = bool(
+        checkpoint_config.get(
+            "use_transatt_decoder",
+            any(key.startswith("head.cross_attn.") for key in state_dict),
+        )
+    )
     config["use_t24_residual"] = bool(
         checkpoint_config.get(
             "use_t24_residual",

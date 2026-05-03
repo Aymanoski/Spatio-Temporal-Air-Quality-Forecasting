@@ -1007,11 +1007,7 @@ class TransAttDecoder(nn.Module):
         self.ffn_fc1 = nn.Linear(hidden_dim, ffn_dim)
         self.ffn_fc2 = nn.Linear(ffn_dim, hidden_dim)
 
-        # Zero-initialized output projection: at init all predictions = 0.
-        # With persistence residual added externally, this gives persistence baseline start.
         self.out_proj = nn.Linear(hidden_dim, output_dim)
-        nn.init.zeros_(self.out_proj.weight)
-        nn.init.zeros_(self.out_proj.bias)
 
         self.drop = nn.Dropout(dropout)
 
@@ -1128,6 +1124,7 @@ class GraphTransformerModel(nn.Module):
         max_delay_hours: float = 24.0,
         delay_wind_window: int = 4,
         use_transatt_decoder: bool = False,
+        transatt_num_heads: int = 2,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -1302,7 +1299,7 @@ class GraphTransformerModel(nn.Module):
                 hidden_dim=hidden_dim,
                 output_dim=output_dim,
                 horizon=horizon,
-                num_heads=num_heads,
+                num_heads=transatt_num_heads,
                 dropout=dropout,
                 max_horizon=max(horizon, 24),
             )
@@ -1428,7 +1425,11 @@ class GraphTransformerModel(nn.Module):
         """
         self.eval()
         with torch.no_grad():
-            enc_out = self.encoder(x, adj, adj_wind=adj_wind)
+            if self.use_transatt_decoder:
+                enc_out, x_seq = self.encoder(x, adj, adj_wind=adj_wind)
+            else:
+                enc_out = self.encoder(x, adj, adj_wind=adj_wind)
+                x_seq = None
             if self.use_post_temporal_gat:
                 h_norm = self.post_gat_norm(enc_out)
                 post_geo_bias = self.post_geo_bias_proj(self.post_dist_matrix_norm.unsqueeze(-1)) if self.post_geo_bias_proj is not None else None
@@ -1437,7 +1438,10 @@ class GraphTransformerModel(nn.Module):
             if self.regime_proj is not None and not self.use_temporal_attention_head:
                 pm25_last = x[:, -1, :, 0:1]
                 enc_out = enc_out + self.regime_proj(pm25_last)
-            predictions = self.head(enc_out, horizon, future_met=future_met)
+            if self.use_transatt_decoder:
+                predictions = self.head(enc_out, x_seq, horizon)
+            else:
+                predictions = self.head(enc_out, horizon, future_met=future_met)
             if self.station_horizon_bias is not None:
                 predictions = predictions + self.station_horizon_bias.unsqueeze(0).unsqueeze(-1)
         return predictions.squeeze(-1)  # (B, horizon, N)
