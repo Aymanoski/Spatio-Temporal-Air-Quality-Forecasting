@@ -227,7 +227,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_nodeproj',  # descriptive name for this architecture/experiment — used in checkpoint naming
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_seed0',  # descriptive name for this architecture/experiment — used in checkpoint naming
 
     # Multi-task auxiliary prediction — TRIED AND REJECTED 2026-04-24:
     # lambda=0.1 → test MAE 20.200, RMSE 38.157. Smaller lambda also failed.
@@ -349,7 +349,7 @@ CONFIG = {
 
     # Node-specific input projection: 12 independent Linear(33→64) layers, one per station.
     # Replaces the single shared projection. Lets each station specialize its feature encoding.
-    'use_node_specific_proj': True,
+    'use_node_specific_proj': False,
 
     # Experiment: edge-conditioned GAT values.
     # Adds W_edge(adj_ij) to value aggregation so message content depends on the edge scalar.
@@ -371,7 +371,7 @@ CONFIG = {
     'resume': False,        # Set to True to resume from checkpoint
 
     # Reproducibility
-    'seed': 42,
+    'seed': 0,
     'deterministic': False,
 
     # Runtime controls (useful for hyperparameter tuning)
