@@ -31,7 +31,7 @@ from utils.graph import (
 CONFIG = {
     # Data
     'data_path': 'data/processed/',
-    'input_len': 24,        # Lookback window (hours)
+    'input_len': 12,        # Lookback window (hours)
     'horizon': 6,           # Prediction horizon (hours)
     
     # Model architecture
