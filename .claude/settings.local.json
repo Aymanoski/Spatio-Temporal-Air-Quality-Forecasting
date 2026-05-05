@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Read(//c/Users/moham/.claude/projects/c--Users-moham-Bachelor/memory/**)",
-      "Bash(python3 -c ' *)"
+      "Bash(python3 -c ' *)",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\moham\\\\Bachelor\\\\data\\\\processed\" -ErrorAction SilentlyContinue)",
+      "Bash(Select-Object Name)"
     ],
     "additionalDirectories": [
       "c:\\Users\\moham\\.claude\\projects\\c--Users-moham-Bachelor\\memory"

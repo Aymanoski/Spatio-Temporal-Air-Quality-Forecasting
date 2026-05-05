@@ -227,7 +227,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_patch4_fft4',  # descriptive name for this architecture/experiment — used in checkpoint naming
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_sparse_anchor',  # descriptive name for this architecture/experiment — used in checkpoint naming
 
     # Multi-task auxiliary prediction — TRIED AND REJECTED 2026-04-24:
     # lambda=0.1 → test MAE 20.200, RMSE 38.157. Smaller lambda also failed.
@@ -354,14 +354,26 @@ CONFIG = {
     # FFT frequency features: append top-K non-DC magnitude components from rfft of 24h PM2.5
     # as K extra input features at every timestep. Pure preprocessing — no arch/alpha risk.
     # K=4 → periods: 24h, 12h, 8h, 6h (diurnal and sub-diurnal cycles).
-    'use_fft_features': True,
+    # TRIED AND REJECTED 2026-05-06: statistical tie Δ+0.097 MAE; MAPE improved −2.734%.
+    'use_fft_features': False,
     'num_fft_features': 4,
 
     # Patch tokenization: group P consecutive timesteps into one token before projection.
     # (B, 24, N, F) → (B, 24//P, N, P*F). Transformer sees 24//P=6 richer tokens instead of 24.
     # patch_size=4 → 6 tokens, each covering 4 hours. No alpha/adjacency interaction.
-    'use_patch_tokenization': True,
+    # TRIED AND REJECTED 2026-05-06: combined with FFT — see above.
+    'use_patch_tokenization': False,
     'patch_size': 4,
+
+    # Sparse historical anchor cross-attention.
+    # Cross-attends enc_out (post-GAT summary) against PM2.5 snapshots at lags OUTSIDE
+    # the 24h lookback window: t-48h, t-72h, t-168h (2, 3, 7 days before forecast origin).
+    # Provides genuinely new periodic context unavailable to the encoder.
+    # Zero-init out_proj → training starts identical to baseline.
+    # Alpha risk: Low — cross-attn is additive to enc_out, does not touch GAT attn logits.
+    # Anchor data loaded from data_tensor.npy; same log1p + StdScaler normalization as input.
+    'use_sparse_anchor': True,
+    'sparse_anchor_lags': [48, 72, 168],  # hours before forecast origin
 
     # Experiment: edge-conditioned GAT values.
     # Adds W_edge(adj_ij) to value aggregation so message content depends on the edge scalar.
@@ -1169,20 +1181,26 @@ def create_dataloaders(train_data, val_data, test_data, config):
     Y_aux_train = train_data[3] if len(train_data) > 3 else None
     Y_aux_val   = val_data[3]   if len(val_data)   > 3 else None
     Y_aux_test  = test_data[3]  if len(test_data)  > 3 else None
+    # Sparse anchor always at position 4 (after Y_aux slot)
+    A_train = train_data[4] if len(train_data) > 4 else None
+    A_val   = val_data[4]   if len(val_data)   > 4 else None
+    A_test  = test_data[4]  if len(test_data)  > 4 else None
 
-    # Tensor order in batch: [X, Y, Z (opt), Y_aux (opt)]
+    # Tensor order in batch: [X, Y, Z (opt), Y_aux (opt), anchor (opt)]
     # train_epoch/validate extract by position using config flags.
-    def _make_dataset(X, Y, Z, Y_aux):
+    def _make_dataset(X, Y, Z, Y_aux, anchor=None):
         tensors = [torch.FloatTensor(X), torch.FloatTensor(Y)]
         if Z is not None:
             tensors.append(torch.FloatTensor(Z))
         if Y_aux is not None:
             tensors.append(torch.FloatTensor(Y_aux))
+        if anchor is not None:
+            tensors.append(torch.FloatTensor(anchor))
         return TensorDataset(*tensors)
 
-    train_dataset = _make_dataset(X_train, Y_train, Z_train, Y_aux_train)
-    val_dataset   = _make_dataset(X_val,   Y_val,   Z_val,   Y_aux_val)
-    test_dataset  = _make_dataset(X_test,  Y_test,  Z_test,  Y_aux_test)
+    train_dataset = _make_dataset(X_train, Y_train, Z_train, Y_aux_train, A_train)
+    val_dataset   = _make_dataset(X_val,   Y_val,   Z_val,   Y_aux_val,   A_val)
+    test_dataset  = _make_dataset(X_test,  Y_test,  Z_test,  Y_aux_test,  A_test)
     
     train_loader = DataLoader(
         train_dataset,
@@ -1315,8 +1333,11 @@ def train_epoch(model, train_loader, optimizer, criterion, adj, config, teacher_
     use_multitask = config.get('use_multitask', False)
     lambda_aux = float(config.get('lambda_aux', 0.1))
     use_future_met = config.get('use_future_met', False)
+    use_sparse_anchor = config.get('use_sparse_anchor', False)
     # Y_aux batch position: 3 if Z also present, else 2
     y_aux_batch_idx = 3 if use_future_met else 2
+    # anchor always after Y_aux slot: position 2 + Z-present + Y_aux-present
+    anchor_batch_idx = 2 + (1 if use_future_met else 0) + (1 if use_multitask else 0)
 
     revin = RevIN(config.get('revin_feature_indices', [0])) if config.get('use_revin', False) else None
 
@@ -1327,6 +1348,7 @@ def train_epoch(model, train_loader, optimizer, criterion, adj, config, teacher_
             Y_batch = Y_batch[:, :config['horizon'], :]
         Z_batch = batch[2].to(device) if use_future_met and len(batch) > 2 else None
         Y_aux_batch = batch[y_aux_batch_idx].to(device) if use_multitask and len(batch) > y_aux_batch_idx else None
+        anchor_batch = batch[anchor_batch_idx].to(device) if use_sparse_anchor and len(batch) > anchor_batch_idx else None
 
         # Gaussian noise augmentation: perturb continuous features only (not wind one-hot).
         # Applied in training only — validate() and compute_metrics() never call this path.
@@ -1374,6 +1396,7 @@ def train_epoch(model, train_loader, optimizer, criterion, adj, config, teacher_
             teacher_forcing_ratio=teacher_forcing_ratio,
             future_met=Z_batch,
             adj_wind=adj_wind_batch,
+            anchor_vals=anchor_batch,
         )
         predictions = out[0]
         aux_preds = out[2] if len(out) > 2 else None  # (B, H, N, n_aux) or None
@@ -1463,7 +1486,9 @@ def validate(model, val_loader, criterion, adj, config, target_scaler=None, met_
     met_cols = config.get('future_met_indices', [])
 
     use_future_met = config.get('use_future_met', False)
+    use_sparse_anchor = config.get('use_sparse_anchor', False)
     y_aux_batch_idx = 3 if use_future_met else 2
+    anchor_batch_idx = 2 + (1 if use_future_met else 0) + (1 if config.get('use_multitask', False) else 0)
 
     revin = RevIN(config.get('revin_feature_indices', [0])) if config.get('use_revin', False) else None
 
@@ -1474,6 +1499,7 @@ def validate(model, val_loader, criterion, adj, config, target_scaler=None, met_
             if Y_batch.shape[1] > config['horizon']:
                 Y_batch = Y_batch[:, :config['horizon'], :]
             Z_batch = batch[2].to(device) if use_future_met and len(batch) > 2 else None
+            anchor_batch = batch[anchor_batch_idx].to(device) if use_sparse_anchor and len(batch) > anchor_batch_idx else None
 
             # Build dynamic adjacency if enabled
             adj_wind_batch = None
@@ -1505,6 +1531,7 @@ def validate(model, val_loader, criterion, adj, config, target_scaler=None, met_
                 teacher_forcing_ratio=0.0,
                 future_met=Z_batch,
                 adj_wind=adj_wind_batch,
+                anchor_vals=anchor_batch,
             )
             predictions = out[0]
             log_vars = out[3] if len(out) > 3 else None
@@ -1586,6 +1613,8 @@ def compute_metrics(model, test_loader, adj, config, target_scaler=None, met_for
     feat_idx = config.get('target_feature_idx', 0)
 
     use_future_met = config.get('use_future_met', False)
+    use_sparse_anchor = config.get('use_sparse_anchor', False)
+    anchor_batch_idx = 2 + (1 if use_future_met else 0) + (1 if config.get('use_multitask', False) else 0)
 
     revin = RevIN(config.get('revin_feature_indices', [0])) if config.get('use_revin', False) else None
 
@@ -1596,6 +1625,7 @@ def compute_metrics(model, test_loader, adj, config, target_scaler=None, met_for
             if Y_batch.shape[1] > config['horizon']:
                 Y_batch = Y_batch[:, :config['horizon'], :]
             Z_batch = batch[2].to(device) if use_future_met and len(batch) > 2 else None
+            anchor_batch = batch[anchor_batch_idx].to(device) if use_sparse_anchor and len(batch) > anchor_batch_idx else None
 
             # Build dynamic adjacency if enabled
             adj_wind_batch = None
@@ -1619,7 +1649,8 @@ def compute_metrics(model, test_loader, adj, config, target_scaler=None, met_for
 
             X_input = revin.normalize(X_batch) if revin is not None else X_batch
             predictions = model.predict(X_input, adj_batch, horizon=config['horizon'],
-                                        future_met=Z_batch, adj_wind=adj_wind_batch)
+                                        future_met=Z_batch, adj_wind=adj_wind_batch,
+                                        anchor_vals=anchor_batch)
 
             # Persistence residual: add last observed PM2.5 to model delta output
             if use_residual:
@@ -1720,6 +1751,37 @@ def train(config, trial=None):
         config['wind_dir_start_idx'] = 18
         config['wind_dir_end_idx'] = 34
 
+    # Sparse anchor: build (N_samples, K, num_nodes) array of outside-window PM2.5 values.
+    # Loads raw data_tensor.npy; applies log1p (same pipeline as main PM2.5 input).
+    # StdScaler normalization applied after scaler fitting below (needs training stats).
+    # Anchor is stored in config['_anchor_array_log1p'] until normalized post-fit.
+    anchor_array_log1p = None
+    if config.get('use_sparse_anchor', False):
+        dt_path = os.path.join(config['data_path'], 'data_tensor.npy')
+        if not os.path.exists(dt_path):
+            raise FileNotFoundError(
+                f"data_tensor.npy not found at {dt_path}. "
+                "Required for sparse anchor experiment."
+            )
+        raw_data = np.load(dt_path)               # (T_total, N, F_raw)
+        pm25_raw = raw_data[:, :, 0]              # (T_total, N)
+        N_samples = X.shape[0]
+        input_len = config['input_len']
+        anchor_lags_h = config.get('sparse_anchor_lags', [48, 72, 168])
+        K = len(anchor_lags_h)
+        anchor_array_log1p = np.zeros((N_samples, K, config['num_nodes']), dtype=np.float32)
+        for k, lag_h in enumerate(anchor_lags_h):
+            steps_before_window = lag_h - input_len  # steps before window start in raw_data
+            for i in range(N_samples):
+                src_idx = i - steps_before_window
+                if src_idx >= 0:
+                    anchor_array_log1p[i, k, :] = pm25_raw[src_idx, :]
+                # else: stays zero (padding for early samples without full history)
+        anchor_array_log1p = np.log1p(anchor_array_log1p)  # match main PM2.5 preprocessing
+        max_pad = max(lag_h - input_len for lag_h in anchor_lags_h)
+        print(f"  Anchor array (log1p): shape {anchor_array_log1p.shape}, "
+              f"lags={anchor_lags_h}h, zero-padded early samples: {max_pad}")
+
     # Split data BEFORE scaling to prevent data leakage
     print("\n[2/6] Splitting data...")
     train_data, val_data, test_data = split_data(X, Y, config)
@@ -1772,6 +1834,7 @@ def train(config, trial=None):
         X_test_scaled, Y_test_scaled = X_test.astype(np.float32), Y_test.astype(np.float32)
         Z_train_scaled = Z_val_scaled = Z_test_scaled = None
         Y_aux_train_scaled = Y_aux_val_scaled = Y_aux_test_scaled = None
+        A_train = A_val = A_test = None  # anchor not usable without scaler stats
 
         # Try to load existing target scaler for metrics inverse transform
         scaler_path = os.path.join(config['data_path'], 'target_scaler.save')
@@ -1812,6 +1875,23 @@ def train(config, trial=None):
                   f"std [{min(stds):.4f}, {max(stds):.4f}]")
         else:
             print(f"  Target scaler mean: {target_scaler.mean_[0]:.4f}  std: {target_scaler.scale_[0]:.4f}")
+
+        # Normalize anchor using PM2.5 stats from feature_scaler (fitted on training only).
+        # log1p already applied above; now apply StdScaler mean/std for PM2.5 (index 0).
+        if anchor_array_log1p is not None:
+            pm25_mean  = float(feature_scaler.mean_[0])
+            pm25_scale = float(feature_scaler.scale_[0])
+            anchor_scaled = (anchor_array_log1p - pm25_mean) / (pm25_scale + 1e-8)
+            anchor_scaled = anchor_scaled.astype(np.float32)
+            # Split into train/val/test using same chronological boundaries as X/Y
+            A_train = anchor_scaled[:train_end]
+            A_val   = anchor_scaled[train_end:val_end]
+            A_test  = anchor_scaled[val_end:]
+            nz = anchor_scaled[anchor_scaled != 0.0]
+            print(f"  Anchor scaled: mean={nz.mean():.4f} std={nz.std():.4f} "
+                  f"(non-zero entries, {len(nz):,} / {anchor_scaled.size:,})")
+        else:
+            A_train = A_val = A_test = None
 
         # Save scalers for inference
         os.makedirs(config['data_path'], exist_ok=True)
@@ -1871,12 +1951,12 @@ def train(config, trial=None):
     else:
         Z_dl_train, Z_dl_val, Z_dl_test = Z_train_scaled, Z_val_scaled, Z_test_scaled
 
-    # Create dataloaders: order is [X, Y, Z (opt), Y_aux (opt)]
-    # Y_aux is always at position 3 (after Z slot, even if Z is None — create_dataloaders handles it)
+    # Create dataloaders: order is [X, Y, Z (opt), Y_aux (opt), anchor (opt)]
+    # Y_aux is always at position 3; anchor always at position 4 — create_dataloaders handles Nones.
     train_loader, val_loader, test_loader = create_dataloaders(
-        (X_train_scaled, Y_train_scaled, Z_dl_train, Y_aux_train_scaled),
-        (X_val_scaled,   Y_val_scaled,   Z_dl_val,   Y_aux_val_scaled),
-        (X_test_scaled,  Y_test_scaled,  Z_dl_test,  Y_aux_test_scaled),
+        (X_train_scaled, Y_train_scaled, Z_dl_train, Y_aux_train_scaled, A_train),
+        (X_val_scaled,   Y_val_scaled,   Z_dl_val,   Y_aux_val_scaled,   A_val),
+        (X_test_scaled,  Y_test_scaled,  Z_dl_test,  Y_aux_test_scaled,  A_test),
         config
     )
 
@@ -1935,6 +2015,8 @@ def train(config, trial=None):
             num_fft_features=config.get('num_fft_features', 4),
             use_patch_tokenization=config.get('use_patch_tokenization', False),
             patch_size=config.get('patch_size', 4),
+            use_sparse_anchor=config.get('use_sparse_anchor', False),
+            num_anchors=len(config.get('sparse_anchor_lags', [48, 72, 168])),
         ).to(device)
         print(f"  Model type: GraphTransformerModel  graph_conv={config.get('graph_conv', 'gcn')}  gat_version={config.get('gat_version', 'v1')}  num_gat_layers={config.get('num_gat_layers', 1)}  post_gat={config.get('use_post_temporal_gat', False)}  temporal_attn_head={config.get('use_temporal_attention_head', False)}")
     else:

@@ -185,6 +185,63 @@ class DelayCrossAttentionFusion(nn.Module):
         return h_temporal + attn_out                                   # residual, no final norm
 
 
+class SparseAnchorCrossAttn(nn.Module):
+    """
+    Cross-attention from Transformer/GAT summary to sparse historical PM2.5 anchors.
+
+    Injects context from K past-day PM2.5 snapshots (outside the 24h lookback window)
+    into enc_out via cross-attention.  enc_out queries; anchor tokens are keys/values.
+
+    Lags are in the same normalized (log1p + StdScaler) space as the main input.
+    Zero-init out_proj → training starts identical to baseline (Pre-LN convention).
+
+    Insertion point: after post_gat, before DirectHorizonHead.
+    """
+
+    def __init__(self, hidden_dim: int, num_anchors: int = 3, num_heads: int = 4,
+                 dropout: float = 0.1):
+        super().__init__()
+        self.anchor_proj = nn.Linear(1, hidden_dim)
+        self.lag_embed = nn.Embedding(num_anchors, hidden_dim)
+        nn.init.normal_(self.lag_embed.weight, mean=0.0, std=0.01)
+
+        self.norm = nn.LayerNorm(hidden_dim)
+        self.cross_attn = nn.MultiheadAttention(
+            hidden_dim, num_heads, dropout=dropout, batch_first=True
+        )
+        self.out_proj = nn.Linear(hidden_dim, hidden_dim)
+        nn.init.zeros_(self.out_proj.weight)
+        nn.init.zeros_(self.out_proj.bias)
+
+    def forward(self, enc_out: torch.Tensor, anchor_vals: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            enc_out:     (B, N, H)
+            anchor_vals: (B, K, N)  scaled PM2.5 at K lag points
+        Returns:
+            (B, N, H)
+        """
+        B, N, H = enc_out.shape
+        K = anchor_vals.shape[1]
+
+        # (B, K, N) → (B, N, K, 1) → Linear(1, H) → (B, N, K, H)
+        anchor_h = self.anchor_proj(anchor_vals.permute(0, 2, 1).unsqueeze(-1))
+
+        # Add lag identity embeddings: (K, H) broadcast over (B, N, K, H)
+        lag_ids = torch.arange(K, device=enc_out.device)
+        anchor_h = anchor_h + self.lag_embed(lag_ids).view(1, 1, K, H)
+
+        # Flatten for MHA: (B*N, K, H) keys/values; (B*N, 1, H) query
+        anchor_h = anchor_h.reshape(B * N, K, H)
+        q = enc_out.reshape(B * N, 1, H)
+
+        q_norm = self.norm(q)                                         # Pre-LN on query
+        ctx, _ = self.cross_attn(q_norm, anchor_h, anchor_h)         # (B*N, 1, H)
+        ctx = ctx.squeeze(1).reshape(B, N, H)
+
+        return enc_out + self.out_proj(ctx)                           # zero-start residual
+
+
 class TemporalPositionalEncoding(nn.Module):
     """Sinusoidal positional encoding for shape (batch, seq_len, hidden_dim)."""
 
@@ -1187,6 +1244,8 @@ class GraphTransformerModel(nn.Module):
         num_fft_features: int = 4,
         use_patch_tokenization: bool = False,
         patch_size: int = 4,
+        use_sparse_anchor: bool = False,
+        num_anchors: int = 3,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -1421,6 +1480,19 @@ class GraphTransformerModel(nn.Module):
         else:
             self.logvar_head = None
 
+        # Sparse historical anchor cross-attention.
+        # Queries enc_out against K outside-window PM2.5 snapshots (e.g. t-48/72/168h).
+        # Zero-init out_proj → starts identical to baseline. Low alpha risk.
+        if use_sparse_anchor:
+            self.sparse_anchor_attn = SparseAnchorCrossAttn(
+                hidden_dim=hidden_dim,
+                num_anchors=num_anchors,
+                num_heads=num_heads,
+                dropout=dropout,
+            )
+        else:
+            self.sparse_anchor_attn = None
+
     def forward(
         self,
         x: torch.Tensor,
@@ -1430,6 +1502,7 @@ class GraphTransformerModel(nn.Module):
         teacher_forcing_ratio: float = 0.0,
         future_met: torch.Tensor = None,
         adj_wind: torch.Tensor = None,
+        anchor_vals: torch.Tensor = None,
     ):
         """
         Args:
@@ -1465,6 +1538,10 @@ class GraphTransformerModel(nn.Module):
             pm25_last = x[:, -1, :, 0:1]                       # (B, N, 1) normalized
             enc_out = enc_out + self.regime_proj(pm25_last)     # (B, N, H)
 
+        # Sparse anchor cross-attention: inject outside-window PM2.5 context before head.
+        if self.sparse_anchor_attn is not None and anchor_vals is not None:
+            enc_out = self.sparse_anchor_attn(enc_out, anchor_vals)
+
         if self.use_transatt_decoder:
             predictions = self.head(enc_out, x_seq, horizon)   # (B, horizon, N, output_dim)
         else:
@@ -1480,7 +1557,8 @@ class GraphTransformerModel(nn.Module):
 
     def predict(self, x: torch.Tensor, adj: torch.Tensor, horizon: int = 6,
                 future_met: torch.Tensor = None,
-                adj_wind: torch.Tensor = None) -> torch.Tensor:
+                adj_wind: torch.Tensor = None,
+                anchor_vals: torch.Tensor = None) -> torch.Tensor:
         """
         Inference without teacher forcing.
 
@@ -1505,6 +1583,8 @@ class GraphTransformerModel(nn.Module):
             if self.regime_proj is not None and not self.use_temporal_attention_head:
                 pm25_last = x[:, -1, :, 0:1]
                 enc_out = enc_out + self.regime_proj(pm25_last)
+            if self.sparse_anchor_attn is not None and anchor_vals is not None:
+                enc_out = self.sparse_anchor_attn(enc_out, anchor_vals)
             if self.use_transatt_decoder:
                 predictions = self.head(enc_out, x_seq, horizon)
             else:
