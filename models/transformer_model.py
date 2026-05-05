@@ -289,6 +289,10 @@ class SpatioTemporalTransformerEncoder(nn.Module):
         max_delay_hours: float = 24.0,
         delay_wind_window: int = 4,
         use_node_specific_proj: bool = False,
+        use_fft_features: bool = False,
+        num_fft_features: int = 4,
+        use_patch_tokenization: bool = False,
+        patch_size: int = 4,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -305,9 +309,21 @@ class SpatioTemporalTransformerEncoder(nn.Module):
         self.use_temporal_first = use_temporal_first
         self.use_geo_embeddings = use_geo_embeddings
         self.use_transport_delay = use_transport_delay
+        self.use_fft_features = use_fft_features
+        self.num_fft_features = num_fft_features
+        self.use_patch_tokenization = use_patch_tokenization
+        self.patch_size = patch_size
+
+        if use_node_specific_proj and (use_fft_features or use_patch_tokenization):
+            raise ValueError("use_node_specific_proj is incompatible with use_fft_features / use_patch_tokenization")
 
         if ffn_dim is None:
             ffn_dim = hidden_dim * 2  # compact: 2× hidden, not the usual 4×
+
+        # Effective input dim after optional FFT concatenation and patch flattening.
+        effective_input_dim = input_dim + (num_fft_features if use_fft_features else 0)
+        if use_patch_tokenization:
+            effective_input_dim *= patch_size
 
         # --- Input projection ---
         # Node-specific: 12 independent F→H linear maps, one per station.
@@ -321,7 +337,7 @@ class SpatioTemporalTransformerEncoder(nn.Module):
             bound = 1.0 / math.sqrt(input_dim)
             nn.init.uniform_(self.node_proj_bias, -bound, bound)
         else:
-            self.input_proj = nn.Linear(input_dim, hidden_dim)
+            self.input_proj = nn.Linear(effective_input_dim, hidden_dim)
             self.node_proj_weight = None
             self.node_proj_bias = None
 
@@ -516,6 +532,26 @@ class SpatioTemporalTransformerEncoder(nn.Module):
 
         # Capture raw input before projection for transport delay computation
         x_raw = x  # (B, T, N, F) — read-only reference
+
+        # FFT features: compute per-node frequency magnitudes from the PM2.5 channel
+        # and broadcast them as K extra features at every timestep.
+        # rfft over T=24 yields 13 components; we skip DC (index 0) and take indices 1..K.
+        # Frequencies: index k → period = T/k hours (e.g. k=1→24h, k=2→12h, k=3→8h, k=4→6h).
+        if self.use_fft_features:
+            pm25 = x[:, :, :, 0]                                           # (B, T, N)
+            fft_mag = torch.fft.rfft(pm25, dim=1).abs()                    # (B, T//2+1, N)
+            fft_feats = fft_mag[:, 1:self.num_fft_features + 1, :]         # (B, K, N) — skip DC
+            fft_feats = fft_feats.permute(0, 2, 1)                         # (B, N, K)
+            fft_feats = fft_feats.unsqueeze(1).expand(-1, T, -1, -1)       # (B, T, N, K)
+            x = torch.cat([x, fft_feats], dim=-1)                          # (B, T, N, F+K)
+
+        # Patch tokenization: group P consecutive timesteps into one token.
+        # (B, T, N, F_eff) → (B, T//P, N, P*F_eff); Transformer sees T//P tokens.
+        if self.use_patch_tokenization:
+            P = self.patch_size
+            F_eff = x.shape[-1]
+            T = T // P
+            x = x.reshape(B, T, P, N, F_eff).permute(0, 1, 3, 2, 4).reshape(B, T, N, P * F_eff)
 
         # 1. Input projection: (B, T, N, H)
         # Split-input path: Transformer gets full 33-feature projection;
@@ -1147,6 +1183,10 @@ class GraphTransformerModel(nn.Module):
         use_transatt_decoder: bool = False,
         transatt_num_heads: int = 2,
         use_node_specific_proj: bool = False,
+        use_fft_features: bool = False,
+        num_fft_features: int = 4,
+        use_patch_tokenization: bool = False,
+        patch_size: int = 4,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -1262,6 +1302,10 @@ class GraphTransformerModel(nn.Module):
             return_full_sequence=use_temporal_attention_head,
             return_encoder_sequence=use_transatt_decoder,
             use_node_specific_proj=use_node_specific_proj,
+            use_fft_features=use_fft_features,
+            num_fft_features=num_fft_features,
+            use_patch_tokenization=use_patch_tokenization,
+            patch_size=patch_size,
             use_multiscale_temporal=use_multiscale_temporal,
             local_window=local_window,
             n_local_layers=n_local_layers,

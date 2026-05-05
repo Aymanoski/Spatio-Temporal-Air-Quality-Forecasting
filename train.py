@@ -32,7 +32,7 @@ CONFIG = {
     # Data
     'data_path': 'data/processed/',
     'input_len': 24,        # Lookback window (hours)
-    'horizon': 1,           # Prediction horizon (hours)
+    'horizon': 6,           # Prediction horizon (hours)
     
     # Model architecture
     'input_dim': 33,        # Number of input features per node
@@ -227,7 +227,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_h1',  # descriptive name for this architecture/experiment — used in checkpoint naming
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_patch4_fft4',  # descriptive name for this architecture/experiment — used in checkpoint naming
 
     # Multi-task auxiliary prediction — TRIED AND REJECTED 2026-04-24:
     # lambda=0.1 → test MAE 20.200, RMSE 38.157. Smaller lambda also failed.
@@ -350,6 +350,18 @@ CONFIG = {
     # Node-specific input projection: 12 independent Linear(33→64) layers, one per station.
     # Replaces the single shared projection. Lets each station specialize its feature encoding.
     'use_node_specific_proj': False,
+
+    # FFT frequency features: append top-K non-DC magnitude components from rfft of 24h PM2.5
+    # as K extra input features at every timestep. Pure preprocessing — no arch/alpha risk.
+    # K=4 → periods: 24h, 12h, 8h, 6h (diurnal and sub-diurnal cycles).
+    'use_fft_features': True,
+    'num_fft_features': 4,
+
+    # Patch tokenization: group P consecutive timesteps into one token before projection.
+    # (B, 24, N, F) → (B, 24//P, N, P*F). Transformer sees 24//P=6 richer tokens instead of 24.
+    # patch_size=4 → 6 tokens, each covering 4 hours. No alpha/adjacency interaction.
+    'use_patch_tokenization': True,
+    'patch_size': 4,
 
     # Experiment: edge-conditioned GAT values.
     # Adds W_edge(adj_ij) to value aggregation so message content depends on the edge scalar.
@@ -1919,6 +1931,10 @@ def train(config, trial=None):
             use_transatt_decoder=config.get('use_transatt_decoder', False),
             transatt_num_heads=config.get('transatt_num_heads', 2),
             use_node_specific_proj=config.get('use_node_specific_proj', False),
+            use_fft_features=config.get('use_fft_features', False),
+            num_fft_features=config.get('num_fft_features', 4),
+            use_patch_tokenization=config.get('use_patch_tokenization', False),
+            patch_size=config.get('patch_size', 4),
         ).to(device)
         print(f"  Model type: GraphTransformerModel  graph_conv={config.get('graph_conv', 'gcn')}  gat_version={config.get('gat_version', 'v1')}  num_gat_layers={config.get('num_gat_layers', 1)}  post_gat={config.get('use_post_temporal_gat', False)}  temporal_attn_head={config.get('use_temporal_attention_head', False)}")
     else:

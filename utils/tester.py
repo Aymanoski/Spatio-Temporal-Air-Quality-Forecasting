@@ -300,6 +300,10 @@ def build_model_from_config(config: dict[str, Any]) -> torch.nn.Module:
             use_geo_embeddings=bool(config.get("use_geo_embeddings", False)),
             use_transatt_decoder=bool(config.get("use_transatt_decoder", False)),
             transatt_num_heads=int(config.get("transatt_num_heads", 2)),
+            use_fft_features=bool(config.get("use_fft_features", False)),
+            num_fft_features=int(config.get("num_fft_features", 4)),
+            use_patch_tokenization=bool(config.get("use_patch_tokenization", False)),
+            patch_size=int(config.get("patch_size", 4)),
         )
 
     if model_type == "gcn_lstm":
