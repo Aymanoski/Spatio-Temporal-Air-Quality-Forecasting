@@ -227,7 +227,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_sparse_anchor',  # descriptive name for this architecture/experiment — used in checkpoint naming
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_SEgmoe',  # descriptive name for this architecture/experiment — used in checkpoint naming
 
     # Multi-task auxiliary prediction — TRIED AND REJECTED 2026-04-24:
     # lambda=0.1 → test MAE 20.200, RMSE 38.157. Smaller lambda also failed.
@@ -365,6 +365,11 @@ CONFIG = {
     'use_patch_tokenization': False,
     'patch_size': 4,
 
+    # Segment-level MoE in the FFN layers
+    # Replaces single FFN with a 2-expert MoE (low/high PM2.5 specialists).
+    # Router uses window-mean PM2.5. Safe: minimal parameters, zero alpha path interaction.
+    'use_seg_moe': True,
+
     # Sparse historical anchor cross-attention.
     # Cross-attends enc_out (post-GAT summary) against PM2.5 snapshots at lags OUTSIDE
     # the 24h lookback window: t-48h, t-72h, t-168h (2, 3, 7 days before forecast origin).
@@ -372,8 +377,18 @@ CONFIG = {
     # Zero-init out_proj → training starts identical to baseline.
     # Alpha risk: Low — cross-attn is additive to enc_out, does not touch GAT attn logits.
     # Anchor data loaded from data_tensor.npy; same log1p + StdScaler normalization as input.
-    'use_sparse_anchor': True,
-    'sparse_anchor_lags': [48, 72, 168],  # hours before forecast origin
+    'use_sparse_anchor': False,
+    'sparse_anchor_lags': [48, 72, 168],  # hours before forecast origin (rejected 2026-05-06)
+
+    # Experiment: iTransformer — inverted attention axis.
+    # Replaces the temporal Transformer (attention over T=24 time tokens per node) with
+    # attention over N=12 station tokens. Each station's 24-step H-dim sequence is
+    # compressed to a single token via Linear(T→1) (learned weighted sum over time),
+    # then L Transformer layers run cross-station attention.
+    # Same num_tf_layers, num_heads, ffn_dim as temporal Transformer — parameter-matched.
+    # Node identity already encoded via node_embed before compression → no PE needed.
+    # Post-GAT, persistence residual, and head are unchanged.
+    'use_itransformer': False,
 
     # Experiment: edge-conditioned GAT values.
     # Adds W_edge(adj_ij) to value aggregation so message content depends on the edge scalar.
@@ -1771,12 +1786,17 @@ def train(config, trial=None):
         K = len(anchor_lags_h)
         anchor_array_log1p = np.zeros((N_samples, K, config['num_nodes']), dtype=np.float32)
         for k, lag_h in enumerate(anchor_lags_h):
-            steps_before_window = lag_h - input_len  # steps before window start in raw_data
+            # Sample i covers raw_data[i : i+input_len]; forecast origin is at raw_data[i+input_len].
+            # Lag lag_h hours before forecast origin = raw_data[i + input_len - lag_h]
+            #                                        = raw_data[i - (lag_h - input_len)]
+            # So steps_before_window = lag_h - input_len (e.g. lag=48, input_len=24 → 24 steps back).
+            # For early samples where src_idx < 0 (i < steps_before_window), we zero-pad.
+            steps_before_window = lag_h - input_len
             for i in range(N_samples):
                 src_idx = i - steps_before_window
                 if src_idx >= 0:
                     anchor_array_log1p[i, k, :] = pm25_raw[src_idx, :]
-                # else: stays zero (padding for early samples without full history)
+                # else: stays zero (zero-padding for early samples without full history)
         anchor_array_log1p = np.log1p(anchor_array_log1p)  # match main PM2.5 preprocessing
         max_pad = max(lag_h - input_len for lag_h in anchor_lags_h)
         print(f"  Anchor array (log1p): shape {anchor_array_log1p.shape}, "
@@ -1878,7 +1898,17 @@ def train(config, trial=None):
 
         # Normalize anchor using PM2.5 stats from feature_scaler (fitted on training only).
         # log1p already applied above; now apply StdScaler mean/std for PM2.5 (index 0).
+        # Index 0 of the scaler corresponds to log1p(PM2.5) because features 0..wind_start_idx-1
+        # are passed to the scaler in order, and PM2.5 is always feature index 0 in X.
+        # If feature ordering changes this assert will catch the mismatch before silently
+        # applying the wrong statistics to the anchor values.
         if anchor_array_log1p is not None:
+            assert feature_scaler.n_features_in_ == config.get('wind_dir_start_idx', 17), (
+                f"feature_scaler was fitted on {feature_scaler.n_features_in_} features but "
+                f"wind_dir_start_idx={config.get('wind_dir_start_idx', 17)}. "
+                "Feature ordering may have changed — PM2.5 index 0 assumption for anchor "
+                "normalization may be wrong."
+            )
             pm25_mean  = float(feature_scaler.mean_[0])
             pm25_scale = float(feature_scaler.scale_[0])
             anchor_scaled = (anchor_array_log1p - pm25_mean) / (pm25_scale + 1e-8)
@@ -2017,6 +2047,9 @@ def train(config, trial=None):
             patch_size=config.get('patch_size', 4),
             use_sparse_anchor=config.get('use_sparse_anchor', False),
             num_anchors=len(config.get('sparse_anchor_lags', [48, 72, 168])),
+            use_itransformer=config.get('use_itransformer', False),
+            input_len=config.get('input_len', 24),
+            use_seg_moe=config.get('use_seg_moe', False),
         ).to(device)
         print(f"  Model type: GraphTransformerModel  graph_conv={config.get('graph_conv', 'gcn')}  gat_version={config.get('gat_version', 'v1')}  num_gat_layers={config.get('num_gat_layers', 1)}  post_gat={config.get('use_post_temporal_gat', False)}  temporal_attn_head={config.get('use_temporal_attention_head', False)}")
     else:

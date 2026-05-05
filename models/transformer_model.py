@@ -224,7 +224,8 @@ class SparseAnchorCrossAttn(nn.Module):
         B, N, H = enc_out.shape
         K = anchor_vals.shape[1]
 
-        # (B, K, N) → (B, N, K, 1) → Linear(1, H) → (B, N, K, H)
+        # permute: (B,K,N) → (B,N,K); unsqueeze: → (B,N,K,1)
+        # Linear(1,H) applies to last dim → (B,N,K,H)
         anchor_h = self.anchor_proj(anchor_vals.permute(0, 2, 1).unsqueeze(-1))
 
         # Add lag identity embeddings: (K, H) broadcast over (B, N, K, H)
@@ -261,6 +262,85 @@ class TemporalPositionalEncoding(nn.Module):
         # x: (batch, seq_len, hidden_dim)
         x = x + self.pe[: x.size(1)].unsqueeze(0)
         return self.dropout(x)
+
+
+class SegMoE(nn.Module):
+    """
+    Segment-level Mixture of Experts FFN.
+    Uses two MLP experts: one for low-PM2.5 regimes, one for high-PM2.5.
+    Router takes the window-mean PM2.5 as input.
+    """
+    def __init__(self, hidden_dim: int, ffn_dim: int, dropout: float = 0.1):
+        super().__init__()
+        self.expert_low = nn.Sequential(
+            nn.Linear(hidden_dim, ffn_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(ffn_dim, hidden_dim),
+            nn.Dropout(dropout)
+        )
+        self.expert_high = nn.Sequential(
+            nn.Linear(hidden_dim, ffn_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(ffn_dim, hidden_dim),
+            nn.Dropout(dropout)
+        )
+        self.router = nn.Sequential(
+            nn.Linear(1, hidden_dim // 2),
+            nn.GELU(),
+            nn.Linear(hidden_dim // 2, 2)
+        )
+
+    def forward(self, x: torch.Tensor, pm25_mean: torch.Tensor) -> torch.Tensor:
+        # x: (..., seq_len, H)
+        # pm25_mean: (..., 1)
+        r = torch.softmax(self.router(pm25_mean), dim=-1)  # (..., 2)
+        r_low = r[..., 0:1].unsqueeze(-2)  # (..., 1, 1)
+        r_high = r[..., 1:2].unsqueeze(-2) # (..., 1, 1)
+        out_low = self.expert_low(x)
+        out_high = self.expert_high(x)
+        return r_low * out_low + r_high * out_high
+
+
+class SegMoETransformerEncoderLayer(nn.Module):
+    """
+    A Transformer encoder layer that uses SegMoE instead of a standard FFN.
+    """
+    def __init__(self, d_model: int, nhead: int, dim_feedforward: int, dropout: float = 0.1):
+        super().__init__()
+        self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=True)
+        self.moe_ffn = SegMoE(d_model, dim_feedforward, dropout=dropout)
+        self.norm1 = nn.LayerNorm(d_model)
+        self.norm2 = nn.LayerNorm(d_model)
+        self.dropout1 = nn.Dropout(dropout)
+
+    def forward(self, src: torch.Tensor, pm25_mean: torch.Tensor) -> torch.Tensor:
+        # Pre-LN
+        nx = self.norm1(src)
+        attn_out, _ = self.self_attn(nx, nx, nx, need_weights=False)
+        src = src + self.dropout1(attn_out)
+        src = src + self.moe_ffn(self.norm2(src), pm25_mean)
+        return src
+
+
+class SegMoETransformerEncoder(nn.Module):
+    """
+    A sequence of SegMoETransformerEncoderLayers.
+    """
+    def __init__(self, layer, num_layers: int, norm: nn.Module = None):
+        super().__init__()
+        import copy
+        self.layers = nn.ModuleList([copy.deepcopy(layer) for _ in range(num_layers)])
+        self.norm = norm
+
+    def forward(self, src: torch.Tensor, pm25_mean: torch.Tensor) -> torch.Tensor:
+        output = src
+        for mod in self.layers:
+            output = mod(output, pm25_mean)
+        if self.norm is not None:
+            output = self.norm(output)
+        return output
 
 
 class TemporalCNN(nn.Module):
@@ -350,6 +430,9 @@ class SpatioTemporalTransformerEncoder(nn.Module):
         num_fft_features: int = 4,
         use_patch_tokenization: bool = False,
         patch_size: int = 4,
+        use_itransformer: bool = False,
+        input_len: int = 24,
+        use_seg_moe: bool = False,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -360,6 +443,8 @@ class SpatioTemporalTransformerEncoder(nn.Module):
         self.return_encoder_sequence = return_encoder_sequence
         self.use_multiscale_temporal = use_multiscale_temporal
         self.use_node_specific_proj = use_node_specific_proj
+        self.use_itransformer = use_itransformer
+        self.use_seg_moe = use_seg_moe
         self.use_tcn_branch = use_tcn_branch
         self.use_dual_channel_spatial = use_dual_channel_spatial
         self.use_pm25_spatial_path = use_pm25_spatial_path
@@ -491,23 +576,76 @@ class SpatioTemporalTransformerEncoder(nn.Module):
             self.gcn_bias = nn.Parameter(torch.zeros(hidden_dim))
             nn.init.xavier_uniform_(self.gcn_weight)
 
-        # --- Temporal: Transformer encoder ---
+        # --- Temporal: Transformer encoder (attention over T time tokens) ---
         self.pos_encoding = TemporalPositionalEncoding(hidden_dim, dropout=dropout)
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=hidden_dim,
-            nhead=num_heads,
-            dim_feedforward=ffn_dim,
-            dropout=dropout,
-            activation="gelu",
-            norm_first=True,   # Pre-LN: more stable, matches codebase convention
-            batch_first=True,  # (batch, seq, dim) convention
-        )
-        self.transformer = nn.TransformerEncoder(
-            encoder_layer,
-            num_layers=num_tf_layers,
-            norm=nn.LayerNorm(hidden_dim),     # final normalisation
-            enable_nested_tensor=False,        # not supported with norm_first=True
-        )
+        
+        if use_seg_moe:
+            encoder_layer = SegMoETransformerEncoderLayer(
+                d_model=hidden_dim,
+                nhead=num_heads,
+                dim_feedforward=ffn_dim,
+                dropout=dropout
+            )
+            self.transformer = SegMoETransformerEncoder(
+                encoder_layer,
+                num_layers=num_tf_layers,
+                norm=nn.LayerNorm(hidden_dim)
+            )
+        else:
+            encoder_layer = nn.TransformerEncoderLayer(
+                d_model=hidden_dim,
+                nhead=num_heads,
+                dim_feedforward=ffn_dim,
+                dropout=dropout,
+                activation="gelu",
+                norm_first=True,   # Pre-LN: more stable, matches codebase convention
+                batch_first=True,  # (batch, seq, dim) convention
+            )
+            self.transformer = nn.TransformerEncoder(
+                encoder_layer,
+                num_layers=num_tf_layers,
+                norm=nn.LayerNorm(hidden_dim),     # final normalisation
+                enable_nested_tensor=False,        # not supported with norm_first=True
+            )
+
+        # --- iTransformer: attention over N station tokens (replaces temporal Transformer) ---
+        # Linear(T, 1) per H-channel: learned weighted sum over T timesteps → one token per station.
+        # Same num_tf_layers and num_heads as the temporal Transformer for fair comparison.
+        # Node identity is already in x via node_embed before compression, so no PE needed.
+        if use_itransformer:
+            self.temporal_compress = nn.Linear(input_len, 1)
+            
+            if use_seg_moe:
+                itransformer_layer = SegMoETransformerEncoderLayer(
+                    d_model=hidden_dim,
+                    nhead=num_heads,
+                    dim_feedforward=ffn_dim,
+                    dropout=dropout
+                )
+                self.itransformer = SegMoETransformerEncoder(
+                    itransformer_layer,
+                    num_layers=num_tf_layers,
+                    norm=nn.LayerNorm(hidden_dim)
+                )
+            else:
+                itransformer_layer = nn.TransformerEncoderLayer(
+                    d_model=hidden_dim,
+                    nhead=num_heads,
+                    dim_feedforward=ffn_dim,
+                    dropout=dropout,
+                    activation="gelu",
+                    norm_first=True,
+                    batch_first=True,
+                )
+                self.itransformer = nn.TransformerEncoder(
+                    itransformer_layer,
+                    num_layers=num_tf_layers,
+                    norm=nn.LayerNorm(hidden_dim),
+                    enable_nested_tensor=False,
+                )
+        else:
+            self.temporal_compress = None
+            self.itransformer = None
 
         # --- Optional local attention branch for multi-scale temporal modeling ---
         # Attends over only the last `local_window` timesteps (recent hours) using a
@@ -586,6 +724,11 @@ class SpatioTemporalTransformerEncoder(nn.Module):
             return_full_sequence=True:  (B, N, T, H) — full temporal sequence per node
         """
         B, T, N, _ = x.shape
+
+        # Window-mean PM2.5 for Seg-MoE routing
+        pm25_mean = None
+        if self.use_seg_moe:
+            pm25_mean = x[:, :, :, 0].mean(dim=1).unsqueeze(-1)  # (B, N, 1)
 
         # Capture raw input before projection for transport delay computation
         x_raw = x  # (B, T, N, F) — read-only reference
@@ -702,46 +845,58 @@ class SpatioTemporalTransformerEncoder(nn.Module):
             gcn_out = F.leaky_relu(gcn_out, negative_slope=0.1)
             x = x + gcn_out                                                  # residual
 
-        # 4. Temporal Transformer — share weights across nodes
-        # (B, T, N, H) → permute → (B, N, T, H) → reshape → (B*N, T, H)
-        x = x.permute(0, 2, 1, 3).reshape(B * N, T, self.hidden_dim)
+        # 4. Temporal encoder — two variants controlled by use_itransformer:
+        #
+        # Standard: attention over T=24 time tokens per node (shared weights across nodes).
+        # iTransformer: compress T→1 per station via learned weighted sum, then attention
+        #               over N=12 station tokens. Same num_tf_layers and num_heads.
+        x_seq = None  # set inside else-branch only when return_encoder_sequence=True
 
-        x = self.pos_encoding(x)   # sinusoidal PE over T
-
-        # Global branch: full bidirectional attention over all T timesteps
-        x_global = self.transformer(x)    # (B*N, T, H)
-
-        # TCN parallel branch: dilated convolutions over (B*N, T, H).
-        # Additive fusion: x_global + tcn_gate * tcn_out.
-        # tcn_gate=0.0 at init → starts identical to Transformer-only baseline.
-        if self.tcn is not None:
-            x_tcn = self.tcn(x)                                  # (B*N, T, H) — same PE input
-            x_global = x_global + self.tcn_gate * x_tcn
-
-        if self.return_full_sequence:
-            # Return all T token representations for attention-based heads.
-            # Shape: (B, N, T, H)
-            return x_global.reshape(B, N, T, self.hidden_dim)
-
-        # TransAtt decoder needs both the full sequence and the last-token summary.
-        # Capture x_seq here before collapsing to last token.
-        x_seq = x_global.reshape(B, N, T, self.hidden_dim) if self.return_encoder_sequence else None
-
-        # Multi-scale: fuse global last-token with local (recent window) last-token.
-        # Both branches see the same PE-encoded input; local branch attends over
-        # only the last `local_window` timesteps using a lighter 1-layer Transformer.
-        if self.use_multiscale_temporal:
-            x_local_in = x[:, -self.local_window:, :]       # (B*N, T_local, H)
-            x_local = self.local_transformer(x_local_in)    # (B*N, T_local, H)
-            gate = torch.sigmoid(self.local_gate_logit)      # scalar in (0, 1)
-            last_global = x_global[:, -1, :]                 # (B*N, H)
-            last_local = x_local[:, -1, :]                   # (B*N, H)
-            x_out = (1 - gate) * last_global + gate * last_local
+        if self.use_itransformer:
+            # Temporal compression: (B, T, N, H) → (B, N, H)
+            # Permute to (B, N, H, T) so Linear(T→1) contracts the time axis per H-channel.
+            x_node = x.permute(0, 2, 3, 1)                      # (B, N, H, T)
+            x_node = self.temporal_compress(x_node).squeeze(-1) # (B, N, H)
+            # iTransformer: attention over N=12 station tokens
+            if self.use_seg_moe:
+                x_out = self.itransformer(x_node, pm25_mean)                   # (B, N, H)
+            else:
+                x_out = self.itransformer(x_node)                   # (B, N, H)
         else:
-            # Last timestep: analogous to an LSTM's final hidden state.
-            x_out = x_global[:, -1, :]                       # (B*N, H)
+            # Standard temporal Transformer — share weights across nodes
+            # (B, T, N, H) → permute → (B, N, T, H) → reshape → (B*N, T, H)
+            x = x.permute(0, 2, 1, 3).reshape(B * N, T, self.hidden_dim)
 
-        x_out = x_out.reshape(B, N, self.hidden_dim)
+            x = self.pos_encoding(x)   # sinusoidal PE over T
+
+            # Global branch: full bidirectional attention over all T timesteps
+            if self.use_seg_moe:
+                pm25_mean_flat = pm25_mean.view(B * N, 1)
+                x_global = self.transformer(x, pm25_mean_flat)
+            else:
+                x_global = self.transformer(x)    # (B*N, T, H)
+
+            # TCN parallel branch
+            if self.tcn is not None:
+                x_tcn = self.tcn(x)
+                x_global = x_global + self.tcn_gate * x_tcn
+
+            if self.return_full_sequence:
+                return x_global.reshape(B, N, T, self.hidden_dim)
+
+            x_seq = x_global.reshape(B, N, T, self.hidden_dim) if self.return_encoder_sequence else None
+
+            if self.use_multiscale_temporal:
+                x_local_in = x[:, -self.local_window:, :]
+                x_local = self.local_transformer(x_local_in)
+                gate = torch.sigmoid(self.local_gate_logit)
+                last_global = x_global[:, -1, :]
+                last_local = x_local[:, -1, :]
+                x_out = (1 - gate) * last_global + gate * last_local
+            else:
+                x_out = x_global[:, -1, :]                      # (B*N, H)
+
+            x_out = x_out.reshape(B, N, self.hidden_dim)
 
         # Transport delay injection: Post-Transformer fusion
         # Fuses target-specific delayed source information using cross-attention
@@ -1246,6 +1401,9 @@ class GraphTransformerModel(nn.Module):
         patch_size: int = 4,
         use_sparse_anchor: bool = False,
         num_anchors: int = 3,
+        use_itransformer: bool = False,
+        input_len: int = 24,
+        use_seg_moe: bool = False,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -1380,6 +1538,9 @@ class GraphTransformerModel(nn.Module):
             wspm_scale=wspm_scale,
             max_delay_hours=max_delay_hours,
             delay_wind_window=delay_wind_window,
+            use_itransformer=use_itransformer,
+            input_len=input_len,
+            use_seg_moe=use_seg_moe,
         )
 
         # Post-temporal spatial refinement (optional).
@@ -1539,7 +1700,11 @@ class GraphTransformerModel(nn.Module):
             enc_out = enc_out + self.regime_proj(pm25_last)     # (B, N, H)
 
         # Sparse anchor cross-attention: inject outside-window PM2.5 context before head.
-        if self.sparse_anchor_attn is not None and anchor_vals is not None:
+        if self.sparse_anchor_attn is not None:
+            assert anchor_vals is not None, (
+                "sparse_anchor_attn is enabled but anchor_vals=None was passed to forward(). "
+                "Check that the DataLoader includes the anchor tensor."
+            )
             enc_out = self.sparse_anchor_attn(enc_out, anchor_vals)
 
         if self.use_transatt_decoder:
@@ -1583,7 +1748,11 @@ class GraphTransformerModel(nn.Module):
             if self.regime_proj is not None and not self.use_temporal_attention_head:
                 pm25_last = x[:, -1, :, 0:1]
                 enc_out = enc_out + self.regime_proj(pm25_last)
-            if self.sparse_anchor_attn is not None and anchor_vals is not None:
+            if self.sparse_anchor_attn is not None:
+                assert anchor_vals is not None, (
+                    "sparse_anchor_attn is enabled but anchor_vals=None was passed to predict(). "
+                    "Check that the DataLoader includes the anchor tensor."
+                )
                 enc_out = self.sparse_anchor_attn(enc_out, anchor_vals)
             if self.use_transatt_decoder:
                 predictions = self.head(enc_out, x_seq, horizon)
