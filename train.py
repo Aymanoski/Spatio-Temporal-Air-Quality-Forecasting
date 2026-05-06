@@ -230,11 +230,20 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_SEgmoe_maepretrain',  # descriptive name for this architecture/experiment — used in checkpoint naming
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_SEgmoe_timewarp',  # descriptive name for this architecture/experiment — used in checkpoint naming
+
+    # Time-warp augmentation: smooth random temporal warp applied per batch during training.
+    # Warps only PM2.5+pollutant+met channels (indices 0:time_warp_end_idx=10).
+    # wspm (10), temporal cyclicals (11-16), wind one-hot (17-32) excluded so
+    # wind adjacency computation stays consistent with real observed conditions.
+    # sigma=0.05 → max displacement ~1.2 timesteps (conservative).
+    'use_time_warp_aug': True,
+    'time_warp_sigma': 0.05,
+    'time_warp_end_idx': 10,  # warp features [0, 10) — excludes wspm
 
     # MAE pretraining: load pretrained encoder weights before supervised fine-tuning.
     # Run pretrain_mae.py first to generate the checkpoint, then set use_mae_pretrain=True.
-    'use_mae_pretrain': True,
+    'use_mae_pretrain': False,
     'mae_pretrained_encoder_path': 'models/checkpoints/pretrained_encoder_mae.pt',
 
     # Multi-task auxiliary prediction — TRIED AND REJECTED 2026-04-24:
@@ -1344,6 +1353,55 @@ def pretrain_met_forecaster(met_forecaster, X_train_scaled, Z_train_scaled,
     return met_forecaster
 
 
+def time_warp_batch(X_batch: torch.Tensor, warp_sigma: float = 0.05,
+                    warp_end_idx: int = 10) -> torch.Tensor:
+    """
+    Apply smooth random time-warping to PM2.5 + pollutant + met channels (indices 0:warp_end_idx).
+
+    A per-sample smooth warp field is generated at low resolution (T//4 knots) then
+    upsampled to T via linear interpolation, so the displacement is spatially coherent.
+    Feature values are resampled from the original sequence via linear interpolation.
+
+    Deliberately excludes:
+      - wspm (index 10): read by build_dynamic_adjacency — must stay at real timesteps
+      - temporal cyclicals (11-16): hard-coded to real timestamps
+      - wind one-hot (17-32): categorical; interpolation would produce fractional values
+
+    Args:
+        X_batch:    (B, T, N, F) float tensor on device
+        warp_sigma: displacement magnitude in units of timesteps; sigma=0.05, T=24 → ±1.2 steps max
+        warp_end_idx: warp features at indices [0, warp_end_idx); default 10 (excludes wspm)
+    Returns:
+        (B, T, N, F) tensor with warped channels; same dtype and device as input
+    """
+    B, T, N, F = X_batch.shape
+    max_warp = warp_sigma * T                             # e.g. 0.05 * 24 = 1.2 timesteps
+
+    # Smooth warp field: sample at T//4+1 random knots, upsample to T
+    n_knots = max(T // 4 + 1, 2)
+    raw = torch.randn(B, 1, n_knots, device=X_batch.device, dtype=X_batch.dtype) * max_warp
+    warp = F.interpolate(raw, size=T, mode='linear', align_corners=True).squeeze(1)  # (B, T)
+
+    # Warped lookup positions, clamped to [0, T-1]
+    t_base = torch.arange(T, dtype=X_batch.dtype, device=X_batch.device).unsqueeze(0)  # (1, T)
+    t_warped = (t_base + warp).clamp(0.0, T - 1.0)                                      # (B, T)
+
+    t0 = t_warped.floor().long()                                       # (B, T)
+    t1 = (t0 + 1).clamp(0, T - 1)                                     # (B, T)
+    frac = (t_warped - t0.float()).unsqueeze(-1).unsqueeze(-1)         # (B, T, 1, 1)
+
+    b_idx = torch.arange(B, device=X_batch.device).view(B, 1).expand(B, T)
+
+    x_sub = X_batch[:, :, :, :warp_end_idx]      # (B, T, N, warp_end_idx)
+    x0 = x_sub[b_idx, t0]                         # (B, T, N, warp_end_idx)
+    x1 = x_sub[b_idx, t1]                         # (B, T, N, warp_end_idx)
+    warped_sub = (1.0 - frac) * x0 + frac * x1   # (B, T, N, warp_end_idx)
+
+    X_out = X_batch.clone()
+    X_out[:, :, :, :warp_end_idx] = warped_sub
+    return X_out
+
+
 def train_epoch(model, train_loader, optimizer, criterion, adj, config, teacher_forcing_ratio,
                 met_forecaster=None):
     """Train for one epoch."""
@@ -1380,6 +1438,16 @@ def train_epoch(model, train_loader, optimizer, criterion, adj, config, teacher_
             X_batch = X_batch.clone()
             X_batch[:, :, :, :wind_start] += (
                 torch.randn_like(X_batch[:, :, :, :wind_start]) * config.get('noise_std', 0.02)
+            )
+
+        # Time-warp augmentation: smooth random temporal warp on PM2.5 + pollutant + met channels.
+        # wspm (10), temporal cyclicals (11-16), and wind one-hot (17-32) are left unchanged
+        # so the wind adjacency computation uses real observed conditions.
+        if config.get('use_time_warp_aug', False):
+            X_batch = time_warp_batch(
+                X_batch,
+                warp_sigma=config.get('time_warp_sigma', 0.05),
+                warp_end_idx=config.get('time_warp_end_idx', 10),
             )
 
         optimizer.zero_grad()
