@@ -230,7 +230,12 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_segmoe_regime_embedding',  # descriptive name for this architecture/experiment — used in checkpoint naming
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_SEgmoe_maepretrain',  # descriptive name for this architecture/experiment — used in checkpoint naming
+
+    # MAE pretraining: load pretrained encoder weights before supervised fine-tuning.
+    # Run pretrain_mae.py first to generate the checkpoint, then set use_mae_pretrain=True.
+    'use_mae_pretrain': True,
+    'mae_pretrained_encoder_path': 'models/checkpoints/pretrained_encoder_mae.pt',
 
     # Multi-task auxiliary prediction — TRIED AND REJECTED 2026-04-24:
     # lambda=0.1 → test MAE 20.200, RMSE 38.157. Smaller lambda also failed.
@@ -2073,6 +2078,16 @@ def train(config, trial=None):
             use_regime_embedding=config.get('use_regime_embedding', False),
         ).to(device)
         print(f"  Model type: GraphTransformerModel  graph_conv={config.get('graph_conv', 'gcn')}  gat_version={config.get('gat_version', 'v1')}  num_gat_layers={config.get('num_gat_layers', 1)}  post_gat={config.get('use_post_temporal_gat', False)}  temporal_attn_head={config.get('use_temporal_attention_head', False)}")
+
+        # MAE pretraining: initialize encoder from pretrained checkpoint before fine-tuning.
+        if config.get('use_mae_pretrain', False):
+            enc_path = config.get('mae_pretrained_encoder_path', '')
+            if os.path.exists(enc_path):
+                encoder_state = torch.load(enc_path, map_location=device)
+                model.encoder.load_state_dict(encoder_state)
+                print(f"  [MAE] Loaded pretrained encoder from {enc_path}")
+            else:
+                print(f"  [MAE] WARNING: pretrained encoder not found at {enc_path} — using random init")
     else:
         model = GCNLSTMModel(
             input_dim=config['input_dim'],
