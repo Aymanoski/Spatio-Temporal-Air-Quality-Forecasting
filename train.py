@@ -203,7 +203,8 @@ CONFIG = {
     'use_wind_adjacency': True,    # Use dynamic wind-aware adjacency
     'wind_alpha': 0.6,
     'use_learnable_alpha_gate': True,
-    'use_regime_alpha': True,         # Per-sample alpha gate conditioned on mean wspm
+    'use_regime_alpha': False,        # REJECTED 2026-05-06: bias collapsed, val/test gap widened
+    'use_regime_persistence': True,   # Per-sample gate on persistence prior from PM2.5 stability
     'use_node_embeddings': True,
     'distance_sigma': 1800,
     'wind_aggregation_mode': 'recent_weighted',
@@ -228,7 +229,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_segmoe_regime_alpha',  # descriptive name for this architecture/experiment — used in checkpoint naming
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_segmoe_regime_persistence',  # descriptive name for this architecture/experiment — used in checkpoint naming
 
     # Multi-task auxiliary prediction — TRIED AND REJECTED 2026-04-24:
     # lambda=0.1 → test MAE 20.200, RMSE 38.157. Smaller lambda also failed.
@@ -1445,6 +1446,8 @@ def train_epoch(model, train_loader, optimizer, criterion, adj, config, teacher_
                 prior = y_last.unsqueeze(1) + slope.unsqueeze(1) * steps  # (B, H, N)
             else:
                 prior = y_last.unsqueeze(1).expand_as(predictions)        # (B, H, N)
+            if config.get('use_regime_persistence') and hasattr(model, 'compute_regime_gate'):
+                prior = prior * model.compute_regime_gate(X_input, feat_idx)
             if config.get('use_horizon_residual_weights', False):
                 hw = model.get_horizon_residual_weights().view(1, -1, 1)  # (1, H, 1)
                 predictions = predictions + hw * prior
@@ -1578,6 +1581,8 @@ def validate(model, val_loader, criterion, adj, config, target_scaler=None, met_
                     prior = y_last.unsqueeze(1) + slope.unsqueeze(1) * steps
                 else:
                     prior = y_last.unsqueeze(1).expand_as(predictions)
+                if config.get('use_regime_persistence') and hasattr(model, 'compute_regime_gate'):
+                    prior = prior * model.compute_regime_gate(X_input, feat_idx)
                 if config.get('use_horizon_residual_weights', False):
                     hw = model.get_horizon_residual_weights().view(1, -1, 1)
                     predictions = predictions + hw * prior
@@ -1692,6 +1697,8 @@ def compute_metrics(model, test_loader, adj, config, target_scaler=None, met_for
                     prior = y_last.unsqueeze(1) + slope.unsqueeze(1) * steps
                 else:
                     prior = y_last.unsqueeze(1).expand_as(predictions)
+                if config.get('use_regime_persistence') and hasattr(model, 'compute_regime_gate'):
+                    prior = prior * model.compute_regime_gate(X_input, feat_idx)
                 if config.get('use_horizon_residual_weights', False):
                     hw = model.get_horizon_residual_weights().view(1, -1, 1)
                     predictions = predictions + hw * prior
@@ -2061,6 +2068,7 @@ def train(config, trial=None):
             input_len=config.get('input_len', 24),
             use_seg_moe=config.get('use_seg_moe', False),
             use_regime_alpha=config.get('use_regime_alpha', False),
+            use_regime_persistence=config.get('use_regime_persistence', False),
         ).to(device)
         print(f"  Model type: GraphTransformerModel  graph_conv={config.get('graph_conv', 'gcn')}  gat_version={config.get('gat_version', 'v1')}  num_gat_layers={config.get('num_gat_layers', 1)}  post_gat={config.get('use_post_temporal_gat', False)}  temporal_attn_head={config.get('use_temporal_attention_head', False)}")
     else:

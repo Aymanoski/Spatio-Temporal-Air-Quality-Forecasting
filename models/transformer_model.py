@@ -1409,6 +1409,7 @@ class GraphTransformerModel(nn.Module):
         input_len: int = 24,
         use_seg_moe: bool = False,
         use_regime_alpha: bool = False,
+        use_regime_persistence: bool = False,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -1500,6 +1501,16 @@ class GraphTransformerModel(nn.Module):
         else:
             self.register_parameter("alpha_logit", None)
             self.regime_alpha_gate = None
+
+        # Regime-conditioned persistence gate: σ(Linear(2→1)([mean_pm25, std_pm25])) scales prior.
+        # Zero-weight init → gate ≈ sigmoid(3.0) ≈ 0.95 for any input (near-1, preserves baseline).
+        self.use_regime_persistence = use_regime_persistence
+        if use_regime_persistence:
+            self.regime_persistence_gate = nn.Linear(2, 1)
+            nn.init.zeros_(self.regime_persistence_gate.weight)
+            self.regime_persistence_gate.bias.data.fill_(3.0)
+        else:
+            self.regime_persistence_gate = None
 
         # Learnable static adjacency: N×N parameter initialized from Gaussian distance decay.
         # Replaces the precomputed A_dist as the (1-alpha) static component.
@@ -1803,6 +1814,16 @@ class GraphTransformerModel(nn.Module):
         return torch.sigmoid(
             self.regime_alpha_gate(mean_wspm.unsqueeze(-1)).squeeze(-1)
         )  # (B,)
+
+    def compute_regime_gate(self, X_input, feat_idx, last_n=6):
+        """Scale factor in [0,1] for persistence prior, conditioned on PM2.5 stability.
+        X_input: (B, T, N, F). Returns (B, 1, 1) gate tensor."""
+        pm25_window = X_input[:, -last_n:, :, feat_idx]      # (B, last_n, N)
+        mean_pm25 = pm25_window.mean(dim=(1, 2))              # (B,)
+        std_pm25 = pm25_window.std(dim=(1, 2))                # (B,)
+        feats = torch.stack([mean_pm25, std_pm25], dim=-1)    # (B, 2)
+        gate = torch.sigmoid(self.regime_persistence_gate(feats))  # (B, 1)
+        return gate.unsqueeze(-1)                              # (B, 1, 1)
 
     def get_static_adj(self):
         """Return row-normalized learnable static adjacency (N, N), or None if disabled.

@@ -832,6 +832,8 @@ def run_model_predictions(
                 else:
                     prior = y_last.unsqueeze(1).expand_as(pred)
 
+                if config.get('use_regime_persistence') and hasattr(model, 'compute_regime_gate'):
+                    prior = prior * model.compute_regime_gate(x_model, target_feature_idx)
                 if use_horizon_residual_weights and hasattr(model, "get_horizon_residual_weights"):
                     hw = model.get_horizon_residual_weights()
                     if hw is not None:
