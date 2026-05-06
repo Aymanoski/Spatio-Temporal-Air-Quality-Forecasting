@@ -1408,6 +1408,7 @@ class GraphTransformerModel(nn.Module):
         use_itransformer: bool = False,
         input_len: int = 24,
         use_seg_moe: bool = False,
+        use_regime_alpha: bool = False,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -1477,15 +1478,28 @@ class GraphTransformerModel(nn.Module):
                 "use_transatt_decoder and use_temporal_attention_head are mutually exclusive."
             )
 
-        # Learnable alpha gate for wind/distance mixing in adjacency construction
-        if use_learnable_alpha_gate:
+        # Learnable alpha gate for wind/distance mixing in adjacency construction.
+        # use_regime_alpha replaces the fixed scalar with a per-sample MLP gate.
+        self.use_regime_alpha = use_regime_alpha
+        self.wind_speed_idx = wind_speed_idx
+        if use_regime_alpha:
+            # Per-sample alpha: Linear(1→1), weight=0 so init alpha = sigmoid(bias) = 0.6
+            _alpha_init = min(max(float(initial_wind_alpha), 1e-4), 1.0 - 1e-4)
+            _bias_val = float(torch.logit(torch.tensor(_alpha_init)))
+            self.regime_alpha_gate = nn.Linear(1, 1)
+            nn.init.zeros_(self.regime_alpha_gate.weight)
+            self.regime_alpha_gate.bias.data.fill_(_bias_val)
+            self.register_parameter("alpha_logit", None)
+        elif use_learnable_alpha_gate:
             alpha = float(initial_wind_alpha)
             alpha = min(max(alpha, 1e-4), 1.0 - 1e-4)
             self.alpha_logit = nn.Parameter(
                 torch.logit(torch.tensor(alpha, dtype=torch.float32))
             )
+            self.regime_alpha_gate = None
         else:
             self.register_parameter("alpha_logit", None)
+            self.regime_alpha_gate = None
 
         # Learnable static adjacency: N×N parameter initialized from Gaussian distance decay.
         # Replaces the precomputed A_dist as the (1-alpha) static component.
@@ -1780,6 +1794,15 @@ class GraphTransformerModel(nn.Module):
         if not self.use_learnable_alpha_gate or self.alpha_logit is None:
             return None
         return torch.sigmoid(self.alpha_logit)
+
+    def get_regime_alpha(self, X_batch):
+        """Per-sample alpha conditioned on mean wspm over the 24h window.
+        X_batch: (B, T, N, F). Returns (B,) alpha tensor."""
+        wspm = X_batch[:, :, :, self.wind_speed_idx]  # (B, T, N)
+        mean_wspm = wspm.mean(dim=(1, 2))              # (B,)
+        return torch.sigmoid(
+            self.regime_alpha_gate(mean_wspm.unsqueeze(-1)).squeeze(-1)
+        )  # (B,)
 
     def get_static_adj(self):
         """Return row-normalized learnable static adjacency (N, N), or None if disabled.

@@ -653,11 +653,13 @@ def build_wind_aware_adjacency_gpu(
     eye_batch = torch.eye(num_nodes, device=device).unsqueeze(0)  # (1, N, N)
     A_wind = A_wind + eye_batch
 
-    # Hybrid adjacency. Alpha may be a float or a trainable scalar tensor.
+    # Hybrid adjacency. Alpha may be a float, scalar tensor, or per-sample (B,) tensor.
     if not torch.is_tensor(alpha):
         alpha = torch.tensor(float(alpha), dtype=wind_speeds.dtype, device=device)
     else:
         alpha = alpha.to(device=device, dtype=wind_speeds.dtype)
+    if alpha.dim() == 1:
+        alpha = alpha.view(-1, 1, 1)  # (B,) → (B, 1, 1) for broadcast
 
     # Use correlation adjacency as static component when provided (replaces distance).
     A_base = corr_dist if corr_dist is not None else A_dist

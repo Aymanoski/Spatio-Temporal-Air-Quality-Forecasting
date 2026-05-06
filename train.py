@@ -203,6 +203,7 @@ CONFIG = {
     'use_wind_adjacency': True,    # Use dynamic wind-aware adjacency
     'wind_alpha': 0.6,
     'use_learnable_alpha_gate': True,
+    'use_regime_alpha': True,         # Per-sample alpha gate conditioned on mean wspm
     'use_node_embeddings': True,
     'distance_sigma': 1800,
     'wind_aggregation_mode': 'recent_weighted',
@@ -227,7 +228,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_itransformer',  # descriptive name for this architecture/experiment — used in checkpoint naming
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_segmoe_regime_alpha',  # descriptive name for this architecture/experiment — used in checkpoint naming
 
     # Multi-task auxiliary prediction — TRIED AND REJECTED 2026-04-24:
     # lambda=0.1 → test MAE 20.200, RMSE 38.157. Smaller lambda also failed.
@@ -368,7 +369,7 @@ CONFIG = {
     # Segment-level MoE in the FFN layers
     # Replaces single FFN with a 2-expert MoE (low/high PM2.5 specialists).
     # Router uses window-mean PM2.5. Safe: minimal parameters, zero alpha path interaction.
-    'use_seg_moe': False,
+    'use_seg_moe': True,
 
     # Sparse historical anchor cross-attention.
     # Cross-attends enc_out (post-GAT summary) against PM2.5 snapshots at lags OUTSIDE
@@ -388,7 +389,7 @@ CONFIG = {
     # Same num_tf_layers, num_heads, ffn_dim as temporal Transformer — parameter-matched.
     # Node identity already encoded via node_embed before compression → no PE needed.
     # Post-GAT, persistence residual, and head are unchanged.
-    'use_itransformer': True,
+    'use_itransformer': False,
 
     # Experiment: edge-conditioned GAT values.
     # Adds W_edge(adj_ij) to value aggregation so message content depends on the edge scalar.
@@ -1382,7 +1383,10 @@ def train_epoch(model, train_loader, optimizer, criterion, adj, config, teacher_
             if config.get('use_dual_channel_spatial', False):
                 adj_batch, adj_wind_batch = build_dual_channel_adjacency_gpu(X_batch, config)
             else:
-                alpha_override = model.get_wind_alpha()
+                if config.get('use_regime_alpha') and hasattr(model, 'get_regime_alpha'):
+                    alpha_override = model.get_regime_alpha(X_batch)
+                else:
+                    alpha_override = model.get_wind_alpha()
                 static_adj_override = model.get_static_adj() if getattr(model, 'use_learnable_static_adj', False) else None
                 adj_batch = build_dynamic_adjacency(X_batch, config, device, alpha_override=alpha_override,
                                                    static_adj_override=static_adj_override)
@@ -1522,7 +1526,10 @@ def validate(model, val_loader, criterion, adj, config, target_scaler=None, met_
                 if config.get('use_dual_channel_spatial', False):
                     adj_batch, adj_wind_batch = build_dual_channel_adjacency_gpu(X_batch, config)
                 else:
-                    alpha_override = model.get_wind_alpha()
+                    if config.get('use_regime_alpha') and hasattr(model, 'get_regime_alpha'):
+                        alpha_override = model.get_regime_alpha(X_batch)
+                    else:
+                        alpha_override = model.get_wind_alpha()
                     static_adj_override = model.get_static_adj() if getattr(model, 'use_learnable_static_adj', False) else None
                     adj_batch = build_dynamic_adjacency(X_batch, config, device, alpha_override=alpha_override,
                                                        static_adj_override=static_adj_override)
@@ -1648,7 +1655,10 @@ def compute_metrics(model, test_loader, adj, config, target_scaler=None, met_for
                 if config.get('use_dual_channel_spatial', False):
                     adj_batch, adj_wind_batch = build_dual_channel_adjacency_gpu(X_batch, config)
                 else:
-                    alpha_override = model.get_wind_alpha()
+                    if config.get('use_regime_alpha') and hasattr(model, 'get_regime_alpha'):
+                        alpha_override = model.get_regime_alpha(X_batch)
+                    else:
+                        alpha_override = model.get_wind_alpha()
                     static_adj_override = model.get_static_adj() if getattr(model, 'use_learnable_static_adj', False) else None
                     adj_batch = build_dynamic_adjacency(X_batch, config, device, alpha_override=alpha_override,
                                                        static_adj_override=static_adj_override)
@@ -2050,6 +2060,7 @@ def train(config, trial=None):
             use_itransformer=config.get('use_itransformer', False),
             input_len=config.get('input_len', 24),
             use_seg_moe=config.get('use_seg_moe', False),
+            use_regime_alpha=config.get('use_regime_alpha', False),
         ).to(device)
         print(f"  Model type: GraphTransformerModel  graph_conv={config.get('graph_conv', 'gcn')}  gat_version={config.get('gat_version', 'v1')}  num_gat_layers={config.get('num_gat_layers', 1)}  post_gat={config.get('use_post_temporal_gat', False)}  temporal_attn_head={config.get('use_temporal_attention_head', False)}")
     else:
@@ -2071,7 +2082,10 @@ def train(config, trial=None):
 
     print(f"  Model parameters: {model.get_num_params():,}")
     if config.get('use_wind_adjacency', False) and config.get('use_learnable_alpha_gate', False):
-        print(f"  Learnable Alpha Gate: ON (initial alpha={config.get('wind_alpha', 0.6):.3f})")
+        if config.get('use_regime_alpha', False):
+            print(f"  Regime Alpha Gate: ON (initial alpha={config.get('wind_alpha', 0.6):.3f}, conditioned on mean wspm)")
+        else:
+            print(f"  Learnable Alpha Gate: ON (initial alpha={config.get('wind_alpha', 0.6):.3f})")
     
     # Loss and optimizer
     loss_type = str(config.get('loss_type', 'mse')).lower()
@@ -2297,7 +2311,11 @@ def train(config, trial=None):
         elapsed = time.time() - start_time
         alpha_str = ""
         if config.get('use_wind_adjacency', False) and config.get('use_learnable_alpha_gate', False):
-            alpha_str = f"Alpha: {float(model.get_wind_alpha().detach().cpu()):.3f} | "
+            if config.get('use_regime_alpha') and hasattr(model, 'regime_alpha_gate') and model.regime_alpha_gate is not None:
+                _b = float(torch.sigmoid(model.regime_alpha_gate.bias).detach().cpu())
+                alpha_str = f"Alpha(bias): {_b:.3f} | "
+            else:
+                alpha_str = f"Alpha: {float(model.get_wind_alpha().detach().cpu()):.3f} | "
         if config.get('use_t24_residual', False):
             alpha_str += f"T24: {float(model.get_t24_alpha().detach().cpu()):.3f} | "
 

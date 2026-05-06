@@ -784,7 +784,10 @@ def run_model_predictions(
             batch_x = torch.as_tensor(X_test[start:start + batch_size], dtype=torch.float32, device=device)
 
             if use_wind_adj:
-                alpha_override = model.get_wind_alpha() if hasattr(model, "get_wind_alpha") else None
+                if config.get('use_regime_alpha') and hasattr(model, 'get_regime_alpha'):
+                    alpha_override = model.get_regime_alpha(batch_x)
+                else:
+                    alpha_override = model.get_wind_alpha() if hasattr(model, "get_wind_alpha") else None
                 sigma_override = model.get_distance_sigma() if hasattr(model, "get_distance_sigma") else None
                 static_adj_override = model.get_static_adj() if hasattr(model, "get_static_adj") else None
                 adj_batch = build_dynamic_adjacency(
