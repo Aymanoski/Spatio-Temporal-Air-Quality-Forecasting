@@ -296,8 +296,12 @@ class SegMoE(nn.Module):
         # x: (..., seq_len, H)
         # pm25_mean: (..., 1)
         r = torch.softmax(self.router(pm25_mean), dim=-1)  # (..., 2)
-        r_low = r[..., 0:1].unsqueeze(-2)  # (..., 1, 1)
-        r_high = r[..., 1:2].unsqueeze(-2) # (..., 1, 1)
+        r_low = r[..., 0:1]   # (..., 1)
+        r_high = r[..., 1:2]  # (..., 1)
+        # Expand to match x dims: temporal path has extra seq dim, iTransformer path does not
+        while r_low.dim() < x.dim():
+            r_low = r_low.unsqueeze(-2)
+            r_high = r_high.unsqueeze(-2)
         out_low = self.expert_low(x)
         out_high = self.expert_high(x)
         return r_low * out_low + r_high * out_high
