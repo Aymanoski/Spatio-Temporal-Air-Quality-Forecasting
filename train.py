@@ -204,7 +204,8 @@ CONFIG = {
     'wind_alpha': 0.6,
     'use_learnable_alpha_gate': True,
     'use_regime_alpha': False,        # REJECTED 2026-05-06: bias collapsed, val/test gap widened
-    'use_regime_persistence': True,   # Per-sample gate on persistence prior from PM2.5 stability
+    'use_regime_persistence': False,  # REJECTED 2026-05-06: val/test gap widened same pattern
+    'use_regime_embedding': True,     # Window stats (mean PM2.5, std PM2.5, mean wspm) → MLP → H, injected before post-GAT
     'use_node_embeddings': True,
     'distance_sigma': 1800,
     'wind_aggregation_mode': 'recent_weighted',
@@ -229,7 +230,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_segmoe_regime_persistence',  # descriptive name for this architecture/experiment — used in checkpoint naming
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_segmoe_regime_embedding',  # descriptive name for this architecture/experiment — used in checkpoint naming
 
     # Multi-task auxiliary prediction — TRIED AND REJECTED 2026-04-24:
     # lambda=0.1 → test MAE 20.200, RMSE 38.157. Smaller lambda also failed.
@@ -2069,6 +2070,7 @@ def train(config, trial=None):
             use_seg_moe=config.get('use_seg_moe', False),
             use_regime_alpha=config.get('use_regime_alpha', False),
             use_regime_persistence=config.get('use_regime_persistence', False),
+            use_regime_embedding=config.get('use_regime_embedding', False),
         ).to(device)
         print(f"  Model type: GraphTransformerModel  graph_conv={config.get('graph_conv', 'gcn')}  gat_version={config.get('gat_version', 'v1')}  num_gat_layers={config.get('num_gat_layers', 1)}  post_gat={config.get('use_post_temporal_gat', False)}  temporal_attn_head={config.get('use_temporal_attention_head', False)}")
     else:

@@ -1410,6 +1410,7 @@ class GraphTransformerModel(nn.Module):
         use_seg_moe: bool = False,
         use_regime_alpha: bool = False,
         use_regime_persistence: bool = False,
+        use_regime_embedding: bool = False,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -1501,6 +1502,20 @@ class GraphTransformerModel(nn.Module):
         else:
             self.register_parameter("alpha_logit", None)
             self.regime_alpha_gate = None
+
+        # Regime embedding: aggregate window stats (mean PM2.5, std PM2.5, mean wspm) → MLP → H.
+        # Injected into enc_out before post-GAT. Zero-init output proj → zero-start guarantee.
+        self.use_regime_embedding = use_regime_embedding
+        if use_regime_embedding:
+            self.regime_embed_proj = nn.Sequential(
+                nn.Linear(3, 16),
+                nn.ReLU(),
+                nn.Linear(16, hidden_dim),
+            )
+            nn.init.zeros_(self.regime_embed_proj[2].weight)
+            nn.init.zeros_(self.regime_embed_proj[2].bias)
+        else:
+            self.regime_embed_proj = None
 
         # Regime-conditioned persistence gate: σ(Linear(2→1)([mean_pm25, std_pm25])) scales prior.
         # Zero-weight init → gate ≈ sigmoid(3.0) ≈ 0.95 for any input (near-1, preserves baseline).
@@ -1713,6 +1728,18 @@ class GraphTransformerModel(nn.Module):
         else:
             enc_out = self.encoder(x, adj, adj_wind=adj_wind)
             x_seq = None
+
+        # Regime embedding: inject window-aggregate stats before post-GAT.
+        # Propagates through spatial refinement and head. Zero-start guaranteed.
+        if self.regime_embed_proj is not None:
+            pm25_win = x[:, :, :, 0]                           # (B, T, N)
+            wspm_win = x[:, :, :, self.wind_speed_idx]         # (B, T, N)
+            regime_stats = torch.stack([
+                pm25_win.mean(dim=1),                          # (B, N) mean PM2.5
+                pm25_win.std(dim=1),                           # (B, N) std PM2.5
+                wspm_win.mean(dim=1),                          # (B, N) mean wspm
+            ], dim=-1)                                          # (B, N, 3)
+            enc_out = enc_out + self.regime_embed_proj(regime_stats)  # (B, N, H)
 
         # Post-temporal spatial refinement (only active when temporal_attention_head=False;
         # mutual exclusion is enforced in __init__).
