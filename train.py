@@ -1374,7 +1374,7 @@ def time_warp_batch(X_batch: torch.Tensor, warp_sigma: float = 0.05,
     Returns:
         (B, T, N, F) tensor with warped channels; same dtype and device as input
     """
-    B, T, N, F = X_batch.shape
+    B, T, N, n_feat = X_batch.shape
     max_warp = warp_sigma * T                             # e.g. 0.05 * 24 = 1.2 timesteps
 
     # Smooth warp field: sample at T//4+1 random knots, upsample to T
