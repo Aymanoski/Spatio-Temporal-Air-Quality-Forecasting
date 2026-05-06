@@ -205,7 +205,7 @@ CONFIG = {
     'use_learnable_alpha_gate': True,
     'use_regime_alpha': False,        # REJECTED 2026-05-06: bias collapsed, val/test gap widened
     'use_regime_persistence': False,  # REJECTED 2026-05-06: val/test gap widened same pattern
-    'use_regime_embedding': True,     # Window stats (mean PM2.5, std PM2.5, mean wspm) → MLP → H, injected before post-GAT
+    'use_regime_embedding': False,     # Window stats (mean PM2.5, std PM2.5, mean wspm) → MLP → H, injected before post-GAT
     'use_node_embeddings': True,
     'distance_sigma': 1800,
     'wind_aggregation_mode': 'recent_weighted',
