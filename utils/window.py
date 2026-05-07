@@ -46,6 +46,30 @@ def compute_holiday_feature(timestamps):
     return result
 
 
+def compute_met_derived_features(data):
+    """
+    Compute dew point depression (T-DEWP) and vapor pressure deficit (VPD) from raw data.
+
+    Both features are derived from TEMP (index 6, Celsius) and DEWP (index 8, Celsius)
+    before any normalisation so the physical relationships are preserved.
+
+    VPD uses the Tetens equation: es(T) = 6.112 * exp(17.67*T / (T+243.5)) [hPa].
+
+    Returns:
+        (T, N, 2) float32 array: [T-DEWP, VPD]
+    """
+    temp = data[:, :, 6].astype(np.float64)  # (T, N)
+    dewp = data[:, :, 8].astype(np.float64)  # (T, N)
+
+    t_minus_dewp = (temp - dewp).astype(np.float32)
+
+    es = 6.112 * np.exp(17.67 * temp / (temp + 243.5))
+    ea = 6.112 * np.exp(17.67 * dewp / (dewp + 243.5))
+    vpd = (es - ea).astype(np.float32)
+
+    return np.stack([t_minus_dewp, vpd], axis=-1)  # (T, N, 2)
+
+
 def create_windows(data, input_len=24, horizon=6, future_met_indices=None, add_pm25_delta=False):
     T, N, F = data.shape
     X, Y, Z = [], [], []
@@ -88,13 +112,16 @@ if __name__ == "__main__":
                         help="Insert PM2.5 first-difference as feature at index 17 (shifts wind one-hot to [18:34])")
     parser.add_argument("--add_holiday", action="store_true",
                         help="Insert Chinese holiday indicator as feature at index 17 (shifts wind one-hot to [18:34])")
+    parser.add_argument("--add_met_derived", action="store_true",
+                        help="Insert T-DEWP and VPD as features at indices 17-18 (shifts wind one-hot to [19:35])")
     parser.add_argument("--save_y_aux", action="store_true",
                         help="Also save Y_aux_{input_len}.npy: future values of features 1-5 "
                              "(PM10, SO2, NO2, CO, O3) at the same horizon steps as Y.")
     args = parser.parse_args()
 
-    if args.add_pm25_delta and args.add_holiday:
-        raise ValueError("--add_pm25_delta and --add_holiday cannot be used together (both insert at index 17).")
+    exclusive = sum([args.add_pm25_delta, args.add_holiday, args.add_met_derived])
+    if exclusive > 1:
+        raise ValueError("--add_pm25_delta, --add_holiday, and --add_met_derived cannot be combined (all modify the same insertion region).")
 
     tensor_path = os.path.join(args.data_path, "data_tensor.npy")
     data = np.load(tensor_path)
@@ -118,6 +145,14 @@ if __name__ == "__main__":
         print(f"Holiday feature inserted at index 17. New shape: {data.shape}")
         print(f"Holiday hours: {n_hol} / {len(timestamps)} ({100*n_hol/len(timestamps):.1f}%)")
 
+    # Insert met-derived features (T-DEWP, VPD) at indices 17-18 before windowing.
+    if args.add_met_derived:
+        derived = compute_met_derived_features(data)  # (T, N, 2)
+        data = np.concatenate([data[:, :, :17], derived, data[:, :, 17:]], axis=2)
+        print(f"Met-derived features (T-DEWP, VPD) inserted at indices 17-18. New shape: {data.shape}")
+        print(f"  T-DEWP range: [{derived[:,:,0].min():.2f}, {derived[:,:,0].max():.2f}]°C")
+        print(f"  VPD range:    [{derived[:,:,1].min():.2f}, {derived[:,:,1].max():.2f}] hPa")
+
     future_met_indices = FUTURE_MET_INDICES if args.future_met else None
     result = create_windows(data, input_len=args.input_len, horizon=args.horizon,
                             future_met_indices=future_met_indices,
@@ -135,6 +170,8 @@ if __name__ == "__main__":
         suffix = "_delta"
     elif args.add_holiday:
         suffix = "_holiday"
+    elif args.add_met_derived:
+        suffix = "_metderived"
     else:
         suffix = ""
     x_path = os.path.join(args.data_path, f"X_{args.input_len}{suffix}.npy")
@@ -146,6 +183,8 @@ if __name__ == "__main__":
     print(f"Y shape: {Y.shape}  -> saved to {y_path}")
     if args.add_pm25_delta or args.add_holiday:
         print("Extra feature inserted at index 17. Wind one-hot now at [18:34].")
+    elif args.add_met_derived:
+        print("Two features inserted at indices 17-18. Wind one-hot now at [19:35].")
 
     if args.save_y_aux:
         # Y_aux: future values of features 1-5 (PM10, SO2, NO2, CO, O3).

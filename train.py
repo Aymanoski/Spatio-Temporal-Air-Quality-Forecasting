@@ -129,14 +129,13 @@ CONFIG = {
     'teacher_forcing_end': 0.0,    # Final teacher forcing ratio
 
     # Loss
-    'loss_type': 'epl',            # Options: 'mse', 'huber', 'evt_hybrid', 'epl'
+    'loss_type': 'evt_hybrid',     # Options: 'mse', 'huber', 'evt_hybrid', 'epl'
     'evt_base_loss_type': 'mse',  # Huber TRIED AND REJECTED 2026-04-24: reduces gradient for large errors → alpha collapses → wind adjacency disabled → test MAE 19.977 vs 19.813
     'huber_delta': 1.0,            # SmoothL1 beta in normalized target space
     'evt_lambda': 0.05,
 
-    # EPL (Extreme Penalized Loss) — tripartite asymmetric loss.
-    # Normal samples: MSE. Extreme under-preds: exp(-err)-1. Extreme over-preds: exp(err/lambda_over)-1.
-    # Threshold reuses evt_threshold (90th pct). lambda_over controls over-prediction relaxation.
+    # EPL (Extreme Penalized Loss) — TRIED AND REJECTED 2026-05-07: test MAE 20.927 (+1.549), RMSE 40.566 (+3.656).
+    # Val/test gap widened to 2.246 vs baseline 1.160. Exponential penalty skewed gradients away from normal samples.
     'epl_lambda_over': 5.0,
     'epl_exp_clamp': 10.0,
     'evt_tail_quantile': 0.90,
@@ -205,6 +204,12 @@ CONFIG = {
     # which shifts wind_dir_start_idx → 18 and wind_dir_end_idx → 34 (auto-applied below).
     'use_pm25_delta': False,  # TRIED AND REJECTED 2026-04-22: val MAE -0.229 but test MAE +0.306, RMSE +0.933, val/test gap widened to 2.127
 
+    # Meteorological derived features: dew point depression (T-DEWP) and vapor pressure deficit (VPD).
+    # Computed from raw TEMP (idx 6) and DEWP (idx 8) in Celsius before normalisation.
+    # Inserted at indices 17-18; wind one-hot shifts to [19:35]. input_dim auto-updates to 35.
+    # Requires X_24_metderived.npy: python utils/window.py --add_met_derived
+    'use_met_derived_features': True,
+
     # Wind-aware adjacency
     'use_wind_adjacency': True,    # Use dynamic wind-aware adjacency
     'wind_alpha': 0.6,
@@ -220,8 +225,8 @@ CONFIG = {
     'wind_normalization': 'row',
     'wind_calm_speed_threshold': 0.1,
     'wind_speed_idx': 10,          # Index of wind speed feature (wspm) — unchanged by delta
-    'wind_dir_start_idx': 17,      # Start index of wind direction one-hot (18 when use_pm25_delta=True)
-    'wind_dir_end_idx': 33,        # End index of wind direction one-hot (34 when use_pm25_delta=True)
+    'wind_dir_start_idx': 19,      # 17 baseline | 18 with pm25_delta/holiday | 19 with met_derived (2 extra features)
+    'wind_dir_end_idx': 35,        # 33 baseline | 34 with pm25_delta/holiday | 35 with met_derived
 
     # Data split
     'train_ratio': 0.7,
@@ -236,7 +241,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_SEgmoe_epl',  # descriptive name for this architecture/experiment — used in checkpoint naming
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_SEgmoe_metderived',  # descriptive name for this architecture/experiment — used in checkpoint naming
 
     # Time-warp augmentation — TRIED AND REJECTED 2026-05-06:
     # Test MAE 19.901 (+0.523), RMSE 37.925 (+1.015) vs Seg-MoE. Val MAE also worse (18.312 vs 18.018).
@@ -879,6 +884,8 @@ def load_data(config):
         suffix = '_delta'
     elif config.get('use_holiday_feature', False):
         suffix = '_holiday'
+    elif config.get('use_met_derived_features', False):
+        suffix = '_metderived'
     else:
         suffix = ''
     x_named = os.path.join(data_path, f'X_{input_len}{suffix}.npy')
