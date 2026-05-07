@@ -25,7 +25,10 @@
       "Bash(python -c \"import pandas as pd; df=pd.read_csv\\('c:/Users/moham/Bachelor/data/raw/PRSA_Data_Aotizhongxin_20130301-20170228.csv'\\); print\\(df.columns.tolist\\(\\)\\); print\\(df.head\\(2\\)\\)\")",
       "Bash(python -c \"import os; files=sorted\\(os.listdir\\('c:/Users/moham/Bachelor/Figures/thesis'\\)\\); [print\\(f\\) for f in files]\")",
       "Bash(.venv/Scripts/python utils/tester.py --checkpoint models/checkpoints/transformer/graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_SEgmoe_T4_best.pt --save-predictions --no-partial-load)",
-      "Bash(.venv/Scripts/python -c ' *)"
+      "Bash(.venv/Scripts/python -c ' *)",
+      "Bash(python utils/tester.py --checkpoint \"models/checkpoints/transformer/graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_SEgmoe_oracle_futuremet_T4_best.pt\" --save-predictions)",
+      "Bash(python utils/tester.py --checkpoint \"models/checkpoints/graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_SEgmoe_oracle_futuremet_T4_best.pt\" --save-predictions)",
+      "Bash(Move-Item -Path \"models/checkpoints/graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_SEgmoe_oracle_futuremet_T4_best.pt\" -Destination \"models/checkpoints/transformer/\")"
     ]
   }
 }

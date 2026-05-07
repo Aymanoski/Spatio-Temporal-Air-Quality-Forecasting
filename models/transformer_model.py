@@ -296,6 +296,7 @@ class SegMoE(nn.Module):
         # x: (..., seq_len, H)
         # pm25_mean: (..., 1)
         r = torch.softmax(self.router(pm25_mean), dim=-1)  # (..., 2)
+        self.last_router_probs = r  # stored for L_var auxiliary loss in train_epoch
         r_low = r[..., 0:1]   # (..., 1)
         r_high = r[..., 1:2]  # (..., 1)
         # Expand to match x dims: temporal path has extra seq dim, iTransformer path does not

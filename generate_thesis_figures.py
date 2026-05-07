@@ -594,8 +594,8 @@ def fig_model_comparison():
         'SegMoE\n(best ✓)',
         'Oracle\nFuture Met',
     ]
-    mae  = [21.64, 21.69, 21.18, 20.62, 19.81, 19.79, 19.49, 19.38, 19.49]
-    rmse = [39.05, 39.08, 38.07, 37.73, 37.51, 37.48, 37.27, 36.91, 35.09]
+    mae  = [21.64, 21.69, 21.18, 20.62, 19.81, 19.79, 19.49, 19.38, 17.27]
+    rmse = [39.05, 39.08, 38.07, 37.73, 37.51, 37.48, 37.27, 36.91, 32.83]
 
     x = np.arange(len(models_short))
     width = 0.38
@@ -646,7 +646,7 @@ def fig_per_horizon_mae():
         'Spatial-First (Bias)':    [ 9.94, 15.07, 18.80, 22.12, 25.06, 27.77],
         'Temporal-First':          [ 9.77, 14.81, 18.59, 21.84, 24.74, 27.51],
         'SegMoE (best ✓)':         [ 9.61, 14.73, 18.43, 21.63, 24.58, 27.29],
-        'Oracle Future Met':       [10.41, 15.65, 19.14, 21.81, 23.98, 25.94],
+        'Oracle Future Met':       [ 9.36, 14.03, 17.05, 19.34, 21.14, 22.71],
     }
     model_colors = [COLORS['neutral'], COLORS['teal'], COLORS['secondary'],
                     COLORS['primary'], '#1A6B3A', '#888888']

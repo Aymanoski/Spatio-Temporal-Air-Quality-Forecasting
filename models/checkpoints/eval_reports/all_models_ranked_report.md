@@ -292,15 +292,18 @@ training setup as identical to current defaults.
 | 58 ★ | graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_tdelay_T4_best.pt | graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_tdelay | 103,882 | 19.5645 | 37.4186 | 36.21% | 0.8362 |
 | 59 ★ | graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_transatt_v2_T4_best.pt | graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_transatt_v2 | 130,762 | 19.5433 | 37.2522 | 37.12% | 0.8376 |
 | 60 ★ | graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_T4_best.pt | graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first | 84,810 | 19.4889 | 37.2707 | 38.56% | 0.8375 |
-| 61 | graph_transformer_gat_v1_residual_futuremet_T4_best.pt | graph_transformer_gat_v1_residual_futuremet | 81,730 | 19.4883 | 35.0871 | 40.8001% | 0.8560 |
+| 61 ⚠ superseded | graph_transformer_gat_v1_residual_futuremet_T4_best.pt | graph_transformer_gat_v1_residual_futuremet | 81,730 | 19.4883 | 35.0871 | 40.8001% | 0.8560 |
 | 62 ★ | graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_SEgmoe_T4_best.pt | graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_SEgmoe | 118,222 | 19.3779 | 36.9097 | 38.08% | 0.8406 |
-| 63 ★ ⚠ | graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_h1_T4_best.pt | graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_h1 | 84,750 | 8.9339 | 17.8906 | 15.86% | 0.9625 |
+| 63 ★ oracle | graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_SEgmoe_oracle_futuremet_T4_best.pt | graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_SEgmoe_oracle_futuremet | 119,566 | 17.2727 | 32.8316 | 29.09% | 0.8739 |
+| 64 ★ ⚠ | graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_h1_T4_best.pt | graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_h1 | 84,750 | 8.9339 | 17.8906 | 15.86% | 0.9625 |
 
 ⚠ **Scaler-mismatch warning (ranks 4, 6–11)**: These checkpoints were trained with `MinMaxScaler` (before the `StandardScaler` + `log1p` normalization was adopted) but were re-evaluated by the current `utils/tester.py` which uses `StandardScaler`. The inverse-transform produces incorrect µg/m³ values, so their test MAE/RMSE figures are artificially inflated and are **not comparable** to the rest of the table. They are included for completeness and to document the experimental history.
 
-⚠ **H1-only warning (rank 63)**: `temporal_first_h1` was trained with `horizon=1`. Its MAE=8.9339 is H1 only and is **not comparable** to any 6-horizon model MAE. It is ranked last for record-keeping; its position in the table does not reflect its actual 6-step forecast capability.
+⚠ **Old oracle warning (rank 61)**: `graph_transformer_gat_v1_residual_futuremet` was the oracle future-met run on the **spatial-first** (pre-temporal-first) architecture. It is superseded by rank 63 (oracle on the final Seg-MoE architecture). Do not use rank 61 numbers in the thesis oracle row.
 
-★ **New entries**: Ranks 31–32, 34–37, 39, 52, 55, 57–60, 62–63 are newly evaluated checkpoints added in the second evaluation pass.
+⚠ **H1-only warning (rank 64)**: `temporal_first_h1` was trained with `horizon=1`. Its MAE=8.9339 is H1 only and is **not comparable** to any 6-horizon model MAE. It is ranked last for record-keeping; its position in the table does not reflect its actual 6-step forecast capability.
+
+★ **New entries**: Ranks 31–32, 34–37, 39, 52, 55, 57–60, 62–64 are newly evaluated checkpoints added in the second evaluation pass. Rank 63 (oracle Seg-MoE) was added 2026-05-07.
 
 **Addendum note**: Ranks 4–11 and 26, 29, 31–63 include checkpoints evaluated from `models/checkpoints/transformer` using `utils/tester.py` with strict checkpoint loading.
 
@@ -329,7 +332,8 @@ All models share: 6-horizon PM2.5 forecast, 24h lookback, 12 Beijing stations, c
 | GT + GCN (transformer backbone, no GAT) | graph_transformer_v1 | 21.69 | 39.08 | 0.821 | Temporal backbone swap: LSTM≈Transformer |
 | GT + GATv1 (no residual) | graph_transformer_gat_v1 | 21.18 | 38.07 | 0.830 | GCN→GAT: Δ −0.452 confirmed |
 | **GT + GATv1 + persistence residual** | graph_transformer_gat_v1_residual | **20.62** | 37.73 | 0.833 | **Best deployable model** |
-| *(oracle)* GT + GATv1 + residual + future met | graph_transformer_gat_v1_residual_futuremet | *19.49* | *35.09* | *0.856* | Not deployable — oracle input. Ceiling diagnostic only. |
+| *(oracle)* GT + GATv1 + residual + future met (spatial-first, superseded) | graph_transformer_gat_v1_residual_futuremet | *19.49* | *35.09* | *0.856* | Superseded by oracle Seg-MoE below. |
+| *(oracle)* GT + GATv1 + log1p/std/bias + temporal-first + SegMoE + future met | graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_SEgmoe_oracle_futuremet | *17.27* | *32.83* | *0.874* | Not deployable — oracle input. Current ceiling diagnostic. −2.105 MAE vs best deployable. |
 
 ### Confirmed design decisions (from controlled ablations)
 
@@ -341,7 +345,7 @@ All models share: 6-horizon PM2.5 forecast, 24h lookback, 12 Beijing stations, c
 | Persistence residual | graph_transformer_gat_v1_residual vs …_gat_v1 | −0.560 | Large H1 gain (−2.52); diminishes at H4-H6 |
 | LSTM → Transformer backbone | graph_transformer_v1 vs gcn_lstm_v2_noattn | +0.055 | **Statistical tie** — temporal backbone is not the bottleneck |
 | Removing MHA in decoder | gcn_lstm_v2_noattn vs alpha+embedding | −0.0005 | **Zero effect** — step_queries alone sufficient |
-| Oracle future met (H4-H6 ceiling) | …_futuremet vs …_residual | −1.136 (avg) | H1: −0.04, H6: −2.66 — information-limited signature |
+| Oracle future met on Seg-MoE (H4-H6 ceiling) | …_SEgmoe_oracle_futuremet vs …_SEgmoe | −2.105 (avg, 2026-05-07) | H1: −0.25, H6: −4.58 — strong information-limited signature. Old spatial-first oracle (−1.136 avg, H6 −2.66) superseded. |
 
 ---
 
@@ -3074,7 +3078,9 @@ actual post-GAT topology. These metrics replace the earlier partial-load result.
 
 ---
 
-## Rank 61: graph_transformer_gat_v1_residual_futuremet_T4_best.pt
+## Rank 61: graph_transformer_gat_v1_residual_futuremet_T4_best.pt ⚠ superseded
+
+**⚠ SUPERSEDED by Rank 63** (oracle on Seg-MoE, 2026-05-07). This oracle was run on the older spatial-first architecture (no temporal-first, no SegMoE, no log1p/StdScaler). Its oracle gap was only 0.307 MAE vs the spatial-first best, because that architecture exploited future met poorly. The rank 63 oracle on the final Seg-MoE architecture is the authoritative oracle diagnostic. Do not use this entry's metrics in the thesis oracle row.
 
 **Architecture Name**: `graph_transformer_gat_v1_residual_futuremet`
 
@@ -3182,7 +3188,55 @@ such a fusion could provide.
 
 ---
 
-## Rank 63: graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_h1_T4_best.pt ⚠
+## Rank 63: graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_SEgmoe_oracle_futuremet_T4_best.pt *(oracle, not deployable)*
+
+**Architecture Name**: `graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_SEgmoe_oracle_futuremet`
+
+**Type**: `GraphTransformerModel` with temporal-first ordering, SegMoE FFN, and oracle future meteorology branch. Identical to rank 62 (confirmed best deployable) plus `use_future_met=True` with `met_forecast_mode='oracle'` (observed future meteorology provided at inference time).
+
+**This is a diagnostic ceiling estimate, not a deployable result.** Future meteorology is observed at test time. In deployment, this would require NWP forecast outputs.
+
+**What it tests**: How much MAE/RMSE improvement is available if the model were given perfect future wind, temperature, pressure, and humidity for all 6 forecast steps? The answer quantifies the *information gap* — how much of H4-H6 degradation is due to missing future meteorological information vs. architectural limitations.
+
+**Key finding (2026-05-07)**: The oracle gap on the final Seg-MoE architecture is **2.105 MAE (≈11%)**, far larger than the old oracle gap of 0.307 MAE measured on the weaker spatial-first architecture. The temporal-first Transformer processes the full sequence before GAT aggregation, enabling far more effective exploitation of future meteorological conditions. The per-horizon gradient confirms the information-limited signature: H1 improves by only −0.25 (small, autocorrelation dominates), while H6 improves by −4.58 (large, future wind conditions are critical at 6 hours ahead).
+
+**Thesis framing**:
+> "Oracle future meteorology experiments confirm that far-horizon prediction difficulty is substantially information-limited. Providing observed future conditions yields a 4.58 µg/m³ improvement at H6 (−16.8%), while H1 improves by only 0.25 µg/m³ (−2.6%). In operational deployment, NWP forecast outputs would partially close this gap. The oracle upper bound establishes the expected benefit of such a fusion."
+
+**Architecture**:
+- All settings identical to rank 62 (temporal-first + SegMoE)
+- `use_future_met`: **True**, `met_forecast_mode`: `oracle`
+- `future_met_indices`: [6, 7, 8, 9, 10, 17–32] (21 met features: temp, pres, dewp, rain, wspm + wind direction one-hot)
+- Adds `head.future_met_proj` branch (~1,344 extra parameters)
+- checkpoint load: strict
+
+**Overall Metrics**:
+- RMSE: 32.8316
+- MAE: 17.2727
+- MAPE: 29.09%
+- R²: 0.8739
+- Epoch: 9 (best val) | Val MAE: 16.2552 | Val/test gap: 1.018 | Alpha: ~0.313
+
+**Per-Horizon Metrics**:
+
+| Horizon | RMSE | MAE | MAPE | Δ MAE vs Seg-MoE (rank 62) |
+|---:|---:|---:|---:|---:|
+| 1 | 18.3688 | 9.3579 | 17.0447% | −0.25 |
+| 2 | 26.6324 | 14.0308 | 23.8763% | −0.70 |
+| 3 | 31.6820 | 17.0518 | 28.3861% | −1.38 |
+| 4 | 35.4002 | 19.3383 | 32.1342% | −2.29 |
+| 5 | 38.4201 | 21.1440 | 35.1433% | −3.43 |
+| 6 | 41.0824 | 22.7134 | 37.9745% | −4.58 |
+
+**Oracle gap summary vs rank 62 (best deployable)**:
+- MAE: 19.3779 → 17.2727 = **−2.105** (−10.9%)
+- RMSE: 36.9097 → 32.8316 = **−4.078** (−11.0%)
+- MAPE: 38.08% → 29.09% = **−8.99%**
+- R²: 0.8406 → 0.8739 = **+0.033**
+
+---
+
+## Rank 64: graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_h1_T4_best.pt ⚠
 
 **Architecture Name**: `graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_h1`
 
