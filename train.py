@@ -123,6 +123,9 @@ CONFIG = {
     'learning_rate': 1e-3,
     'weight_decay': 1e-5,
     'optimizer_type': 'adam',  # AdamW TRIED AND REJECTED 2026-04-24: alpha collapsed 0.64→0.16, test MAE 19.977 vs 19.813. Weight decay destabilizes learnable alpha gate.
+    # Selective AdamW: uses AdamW for all params EXCEPT alpha_logit (weight_decay=0 for alpha_logit).
+    # Addresses the root cause of prior alpha collapse without abandoning AdamW's generalisation benefit.
+    'use_selective_adamw': True,
     'epochs': 100,
     'patience': 15,          # patience=25 TRIED AND REJECTED 2026-04-29: best epoch still 7, no gain (MAE 19.799 vs 19.793). Model converges fast, patience is not the bottleneck.
     'teacher_forcing_start': 1.0,  # Initial teacher forcing ratio
@@ -208,7 +211,7 @@ CONFIG = {
     # Computed from raw TEMP (idx 6) and DEWP (idx 8) in Celsius before normalisation.
     # Inserted at indices 17-18; wind one-hot shifts to [19:35]. input_dim auto-updates to 35.
     # Requires X_24_metderived.npy: python utils/window.py --add_met_derived
-    'use_met_derived_features': True,
+    'use_met_derived_features': False,  # TRIED AND REJECTED 2026-05-07: val MAE 17.962 (best seen) but test MAE 20.018 (+0.640), gap widened to 2.056. Features overfit val distribution.
 
     # Wind-aware adjacency
     'use_wind_adjacency': True,    # Use dynamic wind-aware adjacency
@@ -225,8 +228,8 @@ CONFIG = {
     'wind_normalization': 'row',
     'wind_calm_speed_threshold': 0.1,
     'wind_speed_idx': 10,          # Index of wind speed feature (wspm) — unchanged by delta
-    'wind_dir_start_idx': 19,      # 17 baseline | 18 with pm25_delta/holiday | 19 with met_derived (2 extra features)
-    'wind_dir_end_idx': 35,        # 33 baseline | 34 with pm25_delta/holiday | 35 with met_derived
+    'wind_dir_start_idx': 17,      # Start index of wind direction one-hot (18 when use_pm25_delta=True, 19 when use_met_derived_features=True)
+    'wind_dir_end_idx': 33,        # End index of wind direction one-hot (34 when use_pm25_delta=True, 35 when use_met_derived_features=True)
 
     # Data split
     'train_ratio': 0.7,
@@ -241,7 +244,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_SEgmoe_metderived',  # descriptive name for this architecture/experiment — used in checkpoint naming
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_SEgmoe_adamw_selective',  # descriptive name for this architecture/experiment — used in checkpoint naming
 
     # Time-warp augmentation — TRIED AND REJECTED 2026-05-06:
     # Test MAE 19.901 (+0.523), RMSE 37.925 (+1.015) vs Seg-MoE. Val MAE also worse (18.312 vs 18.018).
@@ -2375,8 +2378,21 @@ def train(config, trial=None):
     else:
         raise ValueError(f"Unsupported loss_type: {loss_type}")
 
-    optimizer = create_optimizer(model.parameters(), config)
-    print(f"  Optimizer: {str(config.get('optimizer_type', 'adam')).upper()}")
+    # Selective AdamW: exclude alpha_logit from weight decay to prevent alpha collapse.
+    # Standard AdamW was rejected 2026-04-24 because weight decay on alpha_logit drove
+    # it to ~0 (alpha 0.64→0.16). Selective decay isolates alpha_logit with wd=0.
+    if config.get('use_selective_adamw', False):
+        decay_params   = [p for n, p in model.named_parameters() if n != 'alpha_logit']
+        no_decay_params = [p for n, p in model.named_parameters() if n == 'alpha_logit']
+        param_groups = [
+            {'params': decay_params,    'weight_decay': float(config.get('weight_decay', 1e-5))},
+            {'params': no_decay_params, 'weight_decay': 0.0},
+        ]
+        optimizer = create_optimizer(param_groups, config, optimizer_type='adamw')
+        print(f"  Optimizer: AdamW (selective — alpha_logit excluded from weight decay)")
+    else:
+        optimizer = create_optimizer(model.parameters(), config)
+        print(f"  Optimizer: {str(config.get('optimizer_type', 'adam')).upper()}")
     
     # Learning rate scheduler: cosine annealing with linear warmup, or ReduceLROnPlateau
     if config.get('use_cosine_schedule', False):
