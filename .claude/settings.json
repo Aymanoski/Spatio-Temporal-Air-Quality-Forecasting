@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python utils/tester.py --checkpoint models/checkpoints/Alpha_angle__best.pt --output-json /tmp/eval_Alpha_angle.json)",
+      "Bash(python utils/tester.py --checkpoint models/checkpoints/alpha+embeding+learnablesigma.pt --output-json /tmp/eval_alpha_learnsigma.json)",
+      "Bash(python utils/tester.py --checkpoint models/checkpoints/transformer/graph_transformer_gat_v1_residual_log1p_all_std_stationbias_TCN_T4_best.pt --output-json /tmp/eval_TCN.json)",
+      "Bash(python utils/tester.py --checkpoint models/checkpoints/transformer/graph_transformer_gat_v1_residual_log1p_all_std_stationbias_dualchan_T4_best.pt --output-json /tmp/eval_dualchan.json)",
+      "Bash(python utils/tester.py --checkpoint models/checkpoints/transformer/graph_transformer_gat_v1_residual_log1p_all_std_stationbias_edgefeat_T4_best.pt --output-json /tmp/eval_edgefeat.json)",
+      "Bash(python utils/tester.py --checkpoint models/checkpoints/transformer/graph_transformer_gat_v1_residual_log1p_all_std_stationbias_TCN_T4_best.pt)",
+      "Bash(python utils/tester.py --checkpoint models/checkpoints/transformer/graph_transformer_gat_v1_residual_log1p_all_std_stationbias_edgefeat_T4_best.pt)",
+      "Bash(cat)",
+      "Bash(python /tmp/eval_missing.py)",
+      "Bash(python /tmp/get_params.py)",
+      "Bash(python -c ' *)",
+      "Bash(python /tmp/eval_all_missing.py)",
+      "Bash(python /tmp/get_params2.py)",
+      "Bash(python utils/tester.py models/checkpoints/transformer/graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_transatt_T4_best.pt)",
+      "Read(//mnt/c/Users/moham/**)",
+      "Bash(python -c \"print\\('hello'\\)\")",
+      "Bash(python utils/tester.py --checkpoint models/checkpoints/transformer/graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_transatt_T4_best.pt)",
+      "Bash(python -c \"import numpy as np; p=np.load\\('c:/Users/moham/Bachelor/data/processed/test_predictions.npy'\\); t=np.load\\('c:/Users/moham/Bachelor/data/processed/test_targets.npy'\\); print\\('predictions shape:', p.shape\\); print\\('targets shape:', t.shape\\)\")",
+      "Bash(python -c \"import numpy as np; d=np.load\\('c:/Users/moham/Bachelor/data/processed/data_tensor.npy'\\); print\\('data_tensor shape:', d.shape\\)\")",
+      "Bash(.venv/Scripts/python generate_thesis_figures.py)",
+      "Bash(python -c \"import os; print\\([f for f in os.listdir\\('c:/Users/moham/Bachelor/data/raw'\\)]\\)\")",
+      "Bash(python -c \"import pandas as pd; df=pd.read_csv\\('c:/Users/moham/Bachelor/data/raw/PRSA_Data_Aotizhongxin_20130301-20170228.csv'\\); print\\(df.columns.tolist\\(\\)\\); print\\(df.head\\(2\\)\\)\")",
+      "Bash(python -c \"import os; files=sorted\\(os.listdir\\('c:/Users/moham/Bachelor/Figures/thesis'\\)\\); [print\\(f\\) for f in files]\")",
+      "Bash(.venv/Scripts/python utils/tester.py --checkpoint models/checkpoints/transformer/graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_SEgmoe_T4_best.pt --save-predictions --no-partial-load)",
+      "Bash(.venv/Scripts/python -c ' *)"
+    ]
+  }
+}

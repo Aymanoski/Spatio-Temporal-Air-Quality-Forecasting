@@ -38,6 +38,7 @@ from train import (
     CONFIG as TRAIN_CONFIG,
     RevIN,
     build_dynamic_adjacency,
+    build_dual_channel_adjacency_gpu,
     fit_scalers_on_train,
     inverse_transform_targets,
     scale_data,
@@ -304,6 +305,11 @@ def build_model_from_config(config: dict[str, Any]) -> torch.nn.Module:
             num_fft_features=int(config.get("num_fft_features", 4)),
             use_patch_tokenization=bool(config.get("use_patch_tokenization", False)),
             patch_size=int(config.get("patch_size", 4)),
+            use_seg_moe=bool(config.get("use_seg_moe", False)),
+            use_transport_delay=bool(config.get("use_transport_delay", False)),
+            max_delay_hours=float(config.get("delay_max_hours", 24.0)),
+            delay_wind_window=int(config.get("delay_wind_window", 4)),
+            use_node_specific_proj=bool(config.get("use_node_specific_proj", False)),
         )
 
     if model_type == "gcn_lstm":
@@ -539,6 +545,24 @@ def prepare_checkpoint_config(checkpoint: dict[str, Any], device: str) -> dict[s
         )
     )
     config["use_temporal_first"] = bool(checkpoint_config.get("use_temporal_first", False))
+    config["use_seg_moe"] = bool(
+        checkpoint_config.get(
+            "use_seg_moe",
+            any(key.startswith("encoder.transformer.layers.0.moe_ffn.") for key in state_dict),
+        )
+    )
+    config["use_transport_delay"] = bool(
+        checkpoint_config.get(
+            "use_transport_delay",
+            any(key.startswith("encoder.transport_delay.") for key in state_dict),
+        )
+    )
+    config["use_node_specific_proj"] = bool(
+        checkpoint_config.get(
+            "use_node_specific_proj",
+            "encoder.node_proj_weight" in state_dict,
+        )
+    )
     config["use_transatt_decoder"] = bool(
         checkpoint_config.get(
             "use_transatt_decoder",
@@ -690,7 +714,9 @@ def load_raw_data_for_config(data_path: Path, config: dict[str, Any]) -> tuple[n
     if x_path.exists() and y_path.exists():
         X = np.load(x_path)
         Y = np.load(y_path)
-    elif suffix:
+    else:
+        # Fallback: build windows dynamically from raw data tensor (handles non-standard input_len
+        # or variant windows that were never cached to disk).
         X, Y = build_variant_windows(
             data_path=data_path,
             input_len=input_len,
@@ -698,9 +724,6 @@ def load_raw_data_for_config(data_path: Path, config: dict[str, Any]) -> tuple[n
             use_pm25_delta=bool(config.get("use_pm25_delta", False)),
             use_holiday_feature=bool(config.get("use_holiday_feature", False)),
         )
-    else:
-        X = np.load(data_path / f"X_{input_len}.npy")
-        Y = np.load(data_path / f"Y_{input_len}.npy")
 
     adj = np.load(data_path / "adjacency.npy")
     z_path = data_path / f"Z_{input_len}.npy"
@@ -764,6 +787,7 @@ def run_model_predictions(
     Z_test: np.ndarray | None = None,
 ) -> np.ndarray:
     use_wind_adj = config.get("use_wind_adjacency", False)
+    use_dual_channel = config.get("use_dual_channel_spatial", False)
     use_residual = config.get("use_persistence_residual", False)
     use_t24 = config.get("use_t24_residual", False)
     use_revin = config.get("use_revin", False)
@@ -783,7 +807,10 @@ def run_model_predictions(
         for start in range(0, len(X_test), batch_size):
             batch_x = torch.as_tensor(X_test[start:start + batch_size], dtype=torch.float32, device=device)
 
-            if use_wind_adj:
+            adj_wind_batch = None
+            if use_dual_channel:
+                adj_batch, adj_wind_batch = build_dual_channel_adjacency_gpu(batch_x, config)
+            elif use_wind_adj:
                 if config.get('use_regime_alpha') and hasattr(model, 'get_regime_alpha'):
                     alpha_override = model.get_regime_alpha(batch_x)
                 else:
@@ -810,7 +837,7 @@ def run_model_predictions(
                 z_batch = last_met.expand(-1, int(config["horizon"]), -1, -1).contiguous()
 
             x_model = revin.normalize(batch_x) if revin is not None else batch_x
-            pred = model.predict(x_model, adj_batch, horizon=config["horizon"], future_met=z_batch)
+            pred = model.predict(x_model, adj_batch, horizon=config["horizon"], future_met=z_batch, adj_wind=adj_wind_batch)
 
             if use_residual:
                 if residual_window > 1:
@@ -960,6 +987,9 @@ def evaluate_checkpoint(
     predictions_scaled = run_model_predictions(
         model, X_eval_scaled, adj, config, device=device, Z_test=Z_eval_scaled
     )
+    # Align target horizon axis to model output (e.g. horizon=1 checkpoint evaluated against Y with 6 steps)
+    if predictions_scaled.shape[1] != Y_eval_scaled.shape[1]:
+        Y_eval_scaled = Y_eval_scaled[:, :predictions_scaled.shape[1], :]
     predictions, targets, is_original_scale = inverse_transform_predictions(
         predictions_scaled,
         Y_eval_scaled,
@@ -1096,6 +1126,13 @@ def print_summary(result: dict[str, Any]) -> None:
     print(f"  MAE:  {overall['MAE']:.4f}")
     print(f"  MAPE: {overall['MAPE']:.2f}%")
     print(f"  R2:   {overall['R2']:.4f}")
+
+    horizon_metrics = result.get("horizon_metrics", [])
+    if horizon_metrics:
+        print("\nPer-Horizon Metrics:")
+        print(f"  {'H':<4} {'RMSE':>8} {'MAE':>8} {'MAPE':>10}")
+        for hm in horizon_metrics:
+            print(f"  {hm['horizon']:<4} {hm['RMSE']:>8.4f} {hm['MAE']:>8.4f} {hm['MAPE']:>9.4f}%")
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
