@@ -77,8 +77,6 @@ def compute_wavelet_features(data, wavelet='db4', level=3):
     approximation (trend) and all detail coefficients — (level+1) channels total,
     each of length T. Lengths are preserved by the stationary (undecimated) transform.
 
-    Uses periodic padding so any signal length is accepted.
-
     Args:
         data: (T, N, F) float32 array
         wavelet: pywt wavelet name (default: 'db4')
@@ -94,8 +92,7 @@ def compute_wavelet_features(data, wavelet='db4', level=3):
     out = np.empty((T, N, level + 1), dtype=np.float32)
     for n in range(N):
         # trim_approx=True → returns [cA_level, cD_level, cD_{level-1}, ..., cD_1]
-        coeffs = pywt.swt(pm25[:, n], wavelet, level=level,
-                          trim_approx=True, padding='periodization')
+        coeffs = pywt.swt(pm25[:, n], wavelet, level=level, trim_approx=True)
         for c, arr in enumerate(coeffs):
             out[:, n, c] = arr.astype(np.float32)
     return out
