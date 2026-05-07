@@ -129,10 +129,16 @@ CONFIG = {
     'teacher_forcing_end': 0.0,    # Final teacher forcing ratio
 
     # Loss
-    'loss_type': 'evt_hybrid',     # Options: 'mse', 'huber', or 'evt_hybrid'
+    'loss_type': 'epl',            # Options: 'mse', 'huber', 'evt_hybrid', 'epl'
     'evt_base_loss_type': 'mse',  # Huber TRIED AND REJECTED 2026-04-24: reduces gradient for large errors → alpha collapses → wind adjacency disabled → test MAE 19.977 vs 19.813
     'huber_delta': 1.0,            # SmoothL1 beta in normalized target space
     'evt_lambda': 0.05,
+
+    # EPL (Extreme Penalized Loss) — tripartite asymmetric loss.
+    # Normal samples: MSE. Extreme under-preds: exp(-err)-1. Extreme over-preds: exp(err/lambda_over)-1.
+    # Threshold reuses evt_threshold (90th pct). lambda_over controls over-prediction relaxation.
+    'epl_lambda_over': 5.0,
+    'epl_exp_clamp': 10.0,
     'evt_tail_quantile': 0.90,
     'evt_xi': 0.10,
     'evt_threshold': None,
@@ -230,7 +236,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_SEgmoe_moevar',  # descriptive name for this architecture/experiment — used in checkpoint naming
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_SEgmoe_epl',  # descriptive name for this architecture/experiment — used in checkpoint naming
 
     # Time-warp augmentation — TRIED AND REJECTED 2026-05-06:
     # Test MAE 19.901 (+0.523), RMSE 37.925 (+1.015) vs Seg-MoE. Val MAE also worse (18.312 vs 18.018).
@@ -386,9 +392,9 @@ CONFIG = {
     'use_seg_moe': True,
 
     # MoE router variance loss: encourages decisive (low-entropy) routing.
-    # L_var = -var(router_probs across experts), averaged over all SegMoE instances and batch.
-    # Small lambda keeps it a soft nudge; no effect on alpha gate or adjacency.
-    'use_moe_var_loss': True,
+    # TRIED AND REJECTED 2026-05-07: val/test gap widened +0.581 (18.208→19.950 vs 18.218→19.378).
+    # Router already specialises adequately with informative PM2.5 scalar input.
+    'use_moe_var_loss': False,
     'lambda_moe_var': 0.02,
 
     # Sparse historical anchor cross-attention.
@@ -615,6 +621,47 @@ def compute_evt_tail_loss(predictions, targets, threshold, xi=0.10, eps=1e-6,
         )
 
     return (excess_weight * (err ** 2)).mean()
+
+
+class EPLForecastLoss(nn.Module):
+    """
+    Tripartite Extreme Penalized Loss.
+
+    Partitions each prediction-target pair into three regimes:
+      - Normal (target < threshold): MSE  [err²]
+      - Extreme AND under-predicted (err < 0): exp(-err) - 1  [high penalty]
+      - Extreme AND over-predicted  (err ≥ 0): exp(err / lambda_over) - 1  [relaxed]
+
+    Exponential arguments are clamped to [0, exp_clamp] for numerical stability.
+    threshold is the 90th-percentile of training targets in normalised space (reuses evt_threshold).
+    """
+
+    def __init__(self, threshold, lambda_over=5.0, exp_clamp=10.0):
+        super().__init__()
+        thr = torch.as_tensor(threshold, dtype=torch.float32)
+        self.register_buffer("threshold", thr)
+        self.lambda_over = float(lambda_over)
+        self.exp_clamp = float(exp_clamp)
+
+    def forward(self, predictions, targets):
+        # predictions / targets: (B, H, N)
+        err = predictions - targets
+
+        thr = self.threshold.to(device=targets.device, dtype=targets.dtype)
+        if thr.ndim == 1:
+            thr = thr.view(1, 1, -1)
+
+        extreme_mask = targets >= thr
+        under_mask = extreme_mask & (err < 0)   # missed high-pollution peak
+        over_mask  = extreme_mask & (err >= 0)  # over-predicted extreme
+        normal_mask = ~extreme_mask
+
+        loss = torch.zeros_like(err)
+        loss[normal_mask] = err[normal_mask] ** 2
+        loss[under_mask]  = torch.exp(torch.clamp(-err[under_mask], 0.0, self.exp_clamp)) - 1.0
+        loss[over_mask]   = torch.exp(torch.clamp(err[over_mask] / self.lambda_over, 0.0, self.exp_clamp)) - 1.0
+
+        return loss.mean()
 
 
 class GaussianNLLForecastLoss(nn.Module):
@@ -2252,6 +2299,16 @@ def train(config, trial=None):
                 f"  Adaptive Lambda Schedule: {sched['initial']} -> {sched['mid']} -> {sched['final']} "
                 f"(warmup={sched['warmup_epochs']}, mid={sched['mid_epochs']}, {sched['transition']})"
             )
+    elif loss_type == 'epl':
+        criterion = EPLForecastLoss(
+            threshold=config['evt_threshold'],
+            lambda_over=float(config.get('epl_lambda_over', 5.0)),
+            exp_clamp=float(config.get('epl_exp_clamp', 10.0)),
+        )
+        thr = config['evt_threshold']
+        thr_str = f"per_node(mean={float(np.mean(thr)):.4f})" if isinstance(thr, (list, tuple, np.ndarray)) else f"{float(thr):.4f}"
+        print(f"  Loss: EPL Tripartite (threshold={thr_str}, q={config['evt_tail_quantile']}, lambda_over={config.get('epl_lambda_over', 5.0)}, exp_clamp={config.get('epl_exp_clamp', 10.0)})")
+
     elif loss_type in {'gaussian_nll', 'gaussian_nll_evt'}:
         if not config.get('use_probabilistic_output', False):
             raise ValueError("Gaussian NLL losses require use_probabilistic_output=True")
