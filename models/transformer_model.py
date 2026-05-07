@@ -307,6 +307,60 @@ class SegMoE(nn.Module):
         return r_low * out_low + r_high * out_high
 
 
+class CascadedGroupAttention(nn.Module):
+    """
+    Cascaded Group Attention over N node tokens.
+
+    Splits hidden_dim into G equal groups. Each group runs attention over N nodes;
+    group g receives its own channel slice PLUS the outputs of all previous groups
+    (cascade), allowing later groups to build on coarser global context.
+
+    Applied as an additive residual: enc_out = enc_out + CGA(LayerNorm(enc_out)).
+    Output projection is zero-initialized so training starts identical to baseline.
+
+    Input / output: (B, N, H)
+    """
+
+    def __init__(self, hidden_dim: int, num_groups: int = 4, dropout: float = 0.1):
+        super().__init__()
+        assert hidden_dim % num_groups == 0, "hidden_dim must be divisible by num_groups"
+        self.num_groups = num_groups
+        self.group_dim  = hidden_dim // num_groups
+        self.scale = self.group_dim ** -0.5
+
+        # Q, K, V for each group. Input width grows with cascade.
+        self.q_projs = nn.ModuleList()
+        self.k_projs = nn.ModuleList()
+        self.v_projs = nn.ModuleList()
+        for g in range(num_groups):
+            in_dim = self.group_dim * (g + 1)   # own slice + outputs from groups 0..g-1
+            self.q_projs.append(nn.Linear(in_dim, self.group_dim, bias=False))
+            self.k_projs.append(nn.Linear(in_dim, self.group_dim, bias=False))
+            self.v_projs.append(nn.Linear(in_dim, self.group_dim, bias=False))
+
+        self.dropout = nn.Dropout(dropout)
+        self.out_proj = nn.Linear(hidden_dim, hidden_dim)
+        nn.init.zeros_(self.out_proj.weight)
+        nn.init.zeros_(self.out_proj.bias)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: (B, N, H)
+        chunks = x.split(self.group_dim, dim=-1)   # G × (B, N, group_dim)
+        outputs = []
+        for g in range(self.num_groups):
+            if g == 0:
+                inp = chunks[0]
+            else:
+                inp = torch.cat([chunks[g]] + outputs, dim=-1)  # (B, N, (g+1)*group_dim)
+            Q = self.q_projs[g](inp)                            # (B, N, group_dim)
+            K = self.k_projs[g](inp)
+            V = self.v_projs[g](inp)
+            attn = torch.softmax(Q @ K.transpose(-2, -1) * self.scale, dim=-1)  # (B, N, N)
+            attn = self.dropout(attn)
+            outputs.append(attn @ V)                            # (B, N, group_dim)
+        return self.out_proj(torch.cat(outputs, dim=-1))        # (B, N, H)
+
+
 class SegMoETransformerEncoderLayer(nn.Module):
     """
     A Transformer encoder layer that uses SegMoE instead of a standard FFN.
@@ -1411,6 +1465,7 @@ class GraphTransformerModel(nn.Module):
         use_regime_alpha: bool = False,
         use_regime_persistence: bool = False,
         use_regime_embedding: bool = False,
+        use_cga: bool = False,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -1606,6 +1661,16 @@ class GraphTransformerModel(nn.Module):
             self.post_gat_norm = None
             self.post_gat = None
 
+        # Cascaded Group Attention: channel-group spatial refinement on (B, N, H) node features.
+        # Applied after post_gat as Pre-LN + CGA + residual. Zero-init out_proj = zero start.
+        self.use_cga = use_cga
+        if use_cga:
+            self.cga_norm = nn.LayerNorm(hidden_dim)
+            self.cga = CascadedGroupAttention(hidden_dim, num_groups=4, dropout=dropout)
+        else:
+            self.cga_norm = None
+            self.cga = None
+
         # Geographic distance bias for post_gat (active in temporal-first mode).
         # Zero-init so post_gat starts identical to baseline.
         if use_geo_embeddings and self.use_post_temporal_gat:
@@ -1749,6 +1814,10 @@ class GraphTransformerModel(nn.Module):
             gat_out = self.post_gat(h_norm, adj, geo_bias=post_geo_bias)    # (B, N, H)
             enc_out = enc_out + gat_out             # residual
 
+        # CGA: cascaded group attention over node tokens, additive residual.
+        if self.cga is not None:
+            enc_out = enc_out + self.cga(self.cga_norm(enc_out))
+
         # Soft regime conditioning: inject last-observed PM2.5 directly into enc_out.
         # Zero-init projection means gradient starts at baseline; learns only if useful.
         if self.regime_proj is not None and not self.use_temporal_attention_head:
@@ -1801,6 +1870,8 @@ class GraphTransformerModel(nn.Module):
                 post_geo_bias = self.post_geo_bias_proj(self.post_dist_matrix_norm.unsqueeze(-1)) if self.post_geo_bias_proj is not None else None
                 gat_out = self.post_gat(h_norm, adj, geo_bias=post_geo_bias)
                 enc_out = enc_out + gat_out
+            if self.cga is not None:
+                enc_out = enc_out + self.cga(self.cga_norm(enc_out))
             if self.regime_proj is not None and not self.use_temporal_attention_head:
                 pm25_last = x[:, -1, :, 0:1]
                 enc_out = enc_out + self.regime_proj(pm25_last)

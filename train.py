@@ -123,9 +123,10 @@ CONFIG = {
     'learning_rate': 1e-3,
     'weight_decay': 1e-5,
     'optimizer_type': 'adam',  # AdamW TRIED AND REJECTED 2026-04-24: alpha collapsed 0.64→0.16, test MAE 19.977 vs 19.813. Weight decay destabilizes learnable alpha gate.
-    # Selective AdamW: uses AdamW for all params EXCEPT alpha_logit (weight_decay=0 for alpha_logit).
-    # Addresses the root cause of prior alpha collapse without abandoning AdamW's generalisation benefit.
-    'use_selective_adamw': True,
+    # Selective AdamW TRIED AND REJECTED 2026-05-07: tie (test MAE 19.370 vs 19.378, -0.008).
+    # Alpha still drifted 0.524→0.060 over 22 epochs (mechanism: AdamW adaptive scaling, not just weight decay).
+    # Selective weight decay fixed sharp early collapse but not slow monotonic drift.
+    'use_selective_adamw': False,
     'epochs': 100,
     'patience': 15,          # patience=25 TRIED AND REJECTED 2026-04-29: best epoch still 7, no gain (MAE 19.799 vs 19.793). Model converges fast, patience is not the bottleneck.
     'teacher_forcing_start': 1.0,  # Initial teacher forcing ratio
@@ -244,7 +245,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_SEgmoe_adamw_selective',  # descriptive name for this architecture/experiment — used in checkpoint naming
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_SEgmoe_cga',  # descriptive name for this architecture/experiment — used in checkpoint naming
 
     # Time-warp augmentation — TRIED AND REJECTED 2026-05-06:
     # Test MAE 19.901 (+0.523), RMSE 37.925 (+1.015) vs Seg-MoE. Val MAE also worse (18.312 vs 18.018).
@@ -398,6 +399,7 @@ CONFIG = {
     # Replaces single FFN with a 2-expert MoE (low/high PM2.5 specialists).
     # Router uses window-mean PM2.5. Safe: minimal parameters, zero alpha path interaction.
     'use_seg_moe': True,
+    'use_cga': True,       # Cascaded Group Attention: splits hidden_dim into 4 groups, each group attends over N nodes with cascaded context from prior groups; zero-init out_proj
 
     # MoE router variance loss: encourages decisive (low-entropy) routing.
     # TRIED AND REJECTED 2026-05-07: val/test gap widened +0.581 (18.208→19.950 vs 18.218→19.378).
@@ -2215,6 +2217,7 @@ def train(config, trial=None):
             use_itransformer=config.get('use_itransformer', False),
             input_len=config.get('input_len', 24),
             use_seg_moe=config.get('use_seg_moe', False),
+            use_cga=config.get('use_cga', False),
             use_regime_alpha=config.get('use_regime_alpha', False),
             use_regime_persistence=config.get('use_regime_persistence', False),
             use_regime_embedding=config.get('use_regime_embedding', False),
