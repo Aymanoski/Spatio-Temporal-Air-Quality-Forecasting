@@ -70,35 +70,20 @@ def compute_met_derived_features(data):
     return np.stack([t_minus_dewp, vpd], axis=-1)  # (T, N, 2)
 
 
-def compute_wavelet_features(data, wavelet='db4', level=3):
-    """Stationary Wavelet Transform (SWT) decomposition of the PM2.5 channel.
+def create_windows(data, input_len=24, horizon=6, future_met_indices=None,
+                   add_pm25_delta=False, add_wavelet=False):
+    """Sliding-window feature extraction.
 
-    Applies SWT along the time axis for each station. Returns the final-level
-    approximation (trend) and all detail coefficients — (level+1) channels total,
-    each of length T. Lengths are preserved by the stationary (undecimated) transform.
-
-    Args:
-        data: (T, N, F) float32 array
-        wavelet: pywt wavelet name (default: 'db4')
-        level: decomposition levels (default: 3 → 4 output channels: cA3, cD3, cD2, cD1)
-
-    Returns:
-        (T, N, level+1) float32 array appended in order [cA_level, cD_level, ..., cD_1]
+    Wavelet note: if add_wavelet=True, SWT is computed *per window* on the
+    24-sample PM2.5 signal so that no future values can enter the computation.
+    Uses db2 (filter length 4) which is the longest db-family wavelet that
+    fits 24 samples at level 3: floor(log2(24/(4-1))) = floor(log2(8)) = 3.
+    Appends 4 channels [cA3, cD3, cD2, cD1] at the end of the feature axis.
     """
-    import pywt
-    T, N, _ = data.shape
-    pm25 = data[:, :, 0].astype(np.float64)  # (T, N)
+    if add_wavelet:
+        import pywt
+        _wav, _level = 'db2', 3  # db4 needs 2^3*(8-1)=56 samples; db2 needs 2^3*(4-1)=24 ✓
 
-    out = np.empty((T, N, level + 1), dtype=np.float32)
-    for n in range(N):
-        # trim_approx=True → returns [cA_level, cD_level, cD_{level-1}, ..., cD_1]
-        coeffs = pywt.swt(pm25[:, n], wavelet, level=level, trim_approx=True)
-        for c, arr in enumerate(coeffs):
-            out[:, n, c] = arr.astype(np.float32)
-    return out
-
-
-def create_windows(data, input_len=24, horizon=6, future_met_indices=None, add_pm25_delta=False):
     T, N, F = data.shape
     X, Y, Z = [], [], []
 
@@ -115,6 +100,17 @@ def create_windows(data, input_len=24, horizon=6, future_met_indices=None, add_p
             # Insert at index 17 (after 6 temporal cyclical features, before wind one-hot).
             # Wind one-hot indices shift from [17:33] to [18:34].
             x_window = np.concatenate([x_window[:, :, :17], delta, x_window[:, :, 17:]], axis=2)
+
+        if add_wavelet:
+            # Per-window SWT: only sees data[i:i+input_len] (pure past) → zero leakage.
+            # trim_approx=True → [cA_level, cD_level, ..., cD_1], each length input_len.
+            pm25_win = x_window[:, :, 0].astype(np.float64)  # (input_len, N)
+            wav_list = []
+            for n in range(N):
+                coeffs = pywt.swt(pm25_win[:, n], _wav, level=_level, trim_approx=True)
+                wav_list.append(np.stack(coeffs, axis=-1).astype(np.float32))  # (input_len, 4)
+            wav_arr = np.stack(wav_list, axis=1)  # (input_len, N, 4)
+            x_window = np.concatenate([x_window, wav_arr], axis=2)
 
         X.append(x_window)
         Y.append(data[i+input_len:i+input_len+horizon, :, 0])  # PM2.5 only
@@ -184,19 +180,14 @@ if __name__ == "__main__":
         print(f"  T-DEWP range: [{derived[:,:,0].min():.2f}, {derived[:,:,0].max():.2f}]°C")
         print(f"  VPD range:    [{derived[:,:,1].min():.2f}, {derived[:,:,1].max():.2f}] hPa")
 
-    # Append SWT wavelet channels of PM2.5 at the end (indices 33-36) before windowing.
-    # Does NOT shift existing indices (appended after all 33 features, not inserted mid-array).
-    if args.add_wavelet:
-        wav = compute_wavelet_features(data, wavelet='db4', level=3)  # (T, N, 4)
-        data = np.concatenate([data, wav], axis=2)
-        print(f"Wavelet features (cA3, cD3, cD2, cD1) appended at indices 33-36. New shape: {data.shape}")
-        print(f"  cA3 range: [{wav[:,:,0].min():.2f}, {wav[:,:,0].max():.2f}]")
-        print(f"  cD1 range: [{wav[:,:,3].min():.2f}, {wav[:,:,3].max():.2f}]")
-
     future_met_indices = FUTURE_MET_INDICES if args.future_met else None
+    if args.add_wavelet:
+        print("Wavelet mode: SWT(db2, level=3) computed per window — no future leakage.")
+        print("  4 channels [cA3, cD3, cD2, cD1] appended at indices 33-36. input_dim → 37.")
     result = create_windows(data, input_len=args.input_len, horizon=args.horizon,
                             future_met_indices=future_met_indices,
-                            add_pm25_delta=args.add_pm25_delta)
+                            add_pm25_delta=args.add_pm25_delta,
+                            add_wavelet=args.add_wavelet)
 
     if args.future_met:
         X, Y, Z = result
