@@ -70,6 +70,37 @@ def compute_met_derived_features(data):
     return np.stack([t_minus_dewp, vpd], axis=-1)  # (T, N, 2)
 
 
+def compute_wavelet_features(data, wavelet='db4', level=3):
+    """Stationary Wavelet Transform (SWT) decomposition of the PM2.5 channel.
+
+    Applies SWT along the time axis for each station. Returns the final-level
+    approximation (trend) and all detail coefficients — (level+1) channels total,
+    each of length T. Lengths are preserved by the stationary (undecimated) transform.
+
+    Uses periodic padding so any signal length is accepted.
+
+    Args:
+        data: (T, N, F) float32 array
+        wavelet: pywt wavelet name (default: 'db4')
+        level: decomposition levels (default: 3 → 4 output channels: cA3, cD3, cD2, cD1)
+
+    Returns:
+        (T, N, level+1) float32 array appended in order [cA_level, cD_level, ..., cD_1]
+    """
+    import pywt
+    T, N, _ = data.shape
+    pm25 = data[:, :, 0].astype(np.float64)  # (T, N)
+
+    out = np.empty((T, N, level + 1), dtype=np.float32)
+    for n in range(N):
+        # trim_approx=True → returns [cA_level, cD_level, cD_{level-1}, ..., cD_1]
+        coeffs = pywt.swt(pm25[:, n], wavelet, level=level,
+                          trim_approx=True, padding='periodization')
+        for c, arr in enumerate(coeffs):
+            out[:, n, c] = arr.astype(np.float32)
+    return out
+
+
 def create_windows(data, input_len=24, horizon=6, future_met_indices=None, add_pm25_delta=False):
     T, N, F = data.shape
     X, Y, Z = [], [], []
@@ -114,6 +145,9 @@ if __name__ == "__main__":
                         help="Insert Chinese holiday indicator as feature at index 17 (shifts wind one-hot to [18:34])")
     parser.add_argument("--add_met_derived", action="store_true",
                         help="Insert T-DEWP and VPD as features at indices 17-18 (shifts wind one-hot to [19:35])")
+    parser.add_argument("--add_wavelet", action="store_true",
+                        help="Append 4 SWT channels of PM2.5 (cA3, cD3, cD2, cD1) at indices 33-36. "
+                             "input_dim becomes 37. Requires pywt (pip install PyWavelets).")
     parser.add_argument("--save_y_aux", action="store_true",
                         help="Also save Y_aux_{input_len}.npy: future values of features 1-5 "
                              "(PM10, SO2, NO2, CO, O3) at the same horizon steps as Y.")
@@ -153,6 +187,15 @@ if __name__ == "__main__":
         print(f"  T-DEWP range: [{derived[:,:,0].min():.2f}, {derived[:,:,0].max():.2f}]°C")
         print(f"  VPD range:    [{derived[:,:,1].min():.2f}, {derived[:,:,1].max():.2f}] hPa")
 
+    # Append SWT wavelet channels of PM2.5 at the end (indices 33-36) before windowing.
+    # Does NOT shift existing indices (appended after all 33 features, not inserted mid-array).
+    if args.add_wavelet:
+        wav = compute_wavelet_features(data, wavelet='db4', level=3)  # (T, N, 4)
+        data = np.concatenate([data, wav], axis=2)
+        print(f"Wavelet features (cA3, cD3, cD2, cD1) appended at indices 33-36. New shape: {data.shape}")
+        print(f"  cA3 range: [{wav[:,:,0].min():.2f}, {wav[:,:,0].max():.2f}]")
+        print(f"  cD1 range: [{wav[:,:,3].min():.2f}, {wav[:,:,3].max():.2f}]")
+
     future_met_indices = FUTURE_MET_INDICES if args.future_met else None
     result = create_windows(data, input_len=args.input_len, horizon=args.horizon,
                             future_met_indices=future_met_indices,
@@ -172,6 +215,8 @@ if __name__ == "__main__":
         suffix = "_holiday"
     elif args.add_met_derived:
         suffix = "_metderived"
+    elif args.add_wavelet:
+        suffix = "_wavelet"
     else:
         suffix = ""
     x_path = os.path.join(args.data_path, f"X_{args.input_len}{suffix}.npy")

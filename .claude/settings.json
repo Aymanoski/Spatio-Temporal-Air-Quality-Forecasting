@@ -30,7 +30,9 @@
       "Bash(python utils/tester.py --checkpoint \"models/checkpoints/graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_SEgmoe_oracle_futuremet_T4_best.pt\" --save-predictions)",
       "Bash(Move-Item -Path \"models/checkpoints/graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_SEgmoe_oracle_futuremet_T4_best.pt\" -Destination \"models/checkpoints/transformer/\")",
       "Bash(dir \"c:\\\\Users\\\\moham\\\\Bachelor\" /b)",
-      "Bash(python utils/window.py --add_met_derived --data_path data/processed/)"
+      "Bash(python utils/window.py --add_met_derived --data_path data/processed/)",
+      "Bash(python -c \"import pywt; print\\(pywt.__version__\\)\")",
+      "Bash(pip install *)"
     ]
   }
 }

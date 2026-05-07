@@ -245,7 +245,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_SEgmoe_cga',  # descriptive name for this architecture/experiment — used in checkpoint naming
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_SEgmoe_wavelet',  # descriptive name for this architecture/experiment — used in checkpoint naming
 
     # Time-warp augmentation — TRIED AND REJECTED 2026-05-06:
     # Test MAE 19.901 (+0.523), RMSE 37.925 (+1.015) vs Seg-MoE. Val MAE also worse (18.312 vs 18.018).
@@ -399,7 +399,8 @@ CONFIG = {
     # Replaces single FFN with a 2-expert MoE (low/high PM2.5 specialists).
     # Router uses window-mean PM2.5. Safe: minimal parameters, zero alpha path interaction.
     'use_seg_moe': True,
-    'use_cga': True,       # Cascaded Group Attention: splits hidden_dim into 4 groups, each group attends over N nodes with cascaded context from prior groups; zero-init out_proj
+    'use_cga': False,      # CGA TRIED AND REJECTED 2026-05-07: test MAE 19.502 (+0.124), RMSE 37.630 (+0.720), gap widened to 1.655
+    'use_wavelet_features': True,   # Append 4 SWT channels of PM2.5 (cA3=trend, cD3/cD2/cD1=detail) at indices 33-36. input_dim auto-updated to 37. Requires X_24_wavelet.npy.
 
     # MoE router variance loss: encourages decisive (low-entropy) routing.
     # TRIED AND REJECTED 2026-05-07: val/test gap widened +0.581 (18.208→19.950 vs 18.218→19.378).
@@ -891,6 +892,8 @@ def load_data(config):
         suffix = '_holiday'
     elif config.get('use_met_derived_features', False):
         suffix = '_metderived'
+    elif config.get('use_wavelet_features', False):
+        suffix = '_wavelet'
     else:
         suffix = ''
     x_named = os.path.join(data_path, f'X_{input_len}{suffix}.npy')
