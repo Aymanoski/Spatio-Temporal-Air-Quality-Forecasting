@@ -103,13 +103,11 @@ def create_windows(data, input_len=24, horizon=6, future_met_indices=None,
 
         if add_wavelet:
             # Per-window SWT: only sees data[i:i+input_len] (pure past) → zero leakage.
-            # trim_approx=True → [cA_level, cD_level, ..., cD_1], each length input_len.
+            # axis=0 applies SWT along time for all N stations at once (no per-station loop).
+            # trim_approx=True → [cA_level, cD_level, ..., cD_1], each (input_len, N).
             pm25_win = x_window[:, :, 0].astype(np.float64)  # (input_len, N)
-            wav_list = []
-            for n in range(N):
-                coeffs = pywt.swt(pm25_win[:, n], _wav, level=_level, trim_approx=True)
-                wav_list.append(np.stack(coeffs, axis=-1).astype(np.float32))  # (input_len, 4)
-            wav_arr = np.stack(wav_list, axis=1)  # (input_len, N, 4)
+            coeffs = pywt.swt(pm25_win, _wav, level=_level, trim_approx=True, axis=0)
+            wav_arr = np.stack(coeffs, axis=-1).astype(np.float32)  # (input_len, N, 4)
             x_window = np.concatenate([x_window, wav_arr], axis=2)
 
         X.append(x_window)

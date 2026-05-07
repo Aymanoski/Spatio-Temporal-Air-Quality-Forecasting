@@ -245,7 +245,7 @@ CONFIG = {
     'best_model_name': 'best_model.pt',
 
     # Checkpoint naming (for comparing different runs)
-    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_SEgmoe_wavelet',  # descriptive name for this architecture/experiment — used in checkpoint naming
+    'architecture_name': 'graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_SEgmoe_stae',  # descriptive name for this architecture/experiment — used in checkpoint naming
 
     # Time-warp augmentation — TRIED AND REJECTED 2026-05-06:
     # Test MAE 19.901 (+0.523), RMSE 37.925 (+1.015) vs Seg-MoE. Val MAE also worse (18.312 vs 18.018).
@@ -400,7 +400,8 @@ CONFIG = {
     # Router uses window-mean PM2.5. Safe: minimal parameters, zero alpha path interaction.
     'use_seg_moe': True,
     'use_cga': False,      # CGA TRIED AND REJECTED 2026-05-07: test MAE 19.502 (+0.124), RMSE 37.630 (+0.720), gap widened to 1.655
-    'use_wavelet_features': True,   # Append 4 SWT channels of PM2.5 (cA3=trend, cD3/cD2/cD1=detail) at indices 33-36. input_dim auto-updated to 37. Requires X_24_wavelet.npy.
+    'use_wavelet_features': False,  # Wavelet TRIED AND REJECTED 2026-05-07: test MAE 19.871 (+0.493), RMSE 38.041 (+1.131), gap widened to 1.856
+    'use_stae': True,      # STAEformer spatio-temporal adaptive embedding: (T=24, N=12, d=8) → proj → hidden_dim, added after input_proj+node_embed. Zero-init → zero start. 2,816 params.
 
     # MoE router variance loss: encourages decisive (low-entropy) routing.
     # TRIED AND REJECTED 2026-05-07: val/test gap widened +0.581 (18.208→19.950 vs 18.218→19.378).
@@ -2220,6 +2221,7 @@ def train(config, trial=None):
             use_itransformer=config.get('use_itransformer', False),
             input_len=config.get('input_len', 24),
             use_seg_moe=config.get('use_seg_moe', False),
+            use_stae=config.get('use_stae', False),
             use_cga=config.get('use_cga', False),
             use_regime_alpha=config.get('use_regime_alpha', False),
             use_regime_persistence=config.get('use_regime_persistence', False),

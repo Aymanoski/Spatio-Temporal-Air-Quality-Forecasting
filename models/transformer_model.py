@@ -491,6 +491,7 @@ class SpatioTemporalTransformerEncoder(nn.Module):
         use_itransformer: bool = False,
         input_len: int = 24,
         use_seg_moe: bool = False,
+        use_stae: bool = False,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -557,6 +558,18 @@ class SpatioTemporalTransformerEncoder(nn.Module):
             nn.init.normal_(self.node_embed.weight, mean=0.0, std=0.01)
         else:
             self.node_embed = None
+
+        # --- Spatio-temporal adaptive embedding (STAEformer, Liu et al. CIKM 2023) ---
+        # Learnable (T, N, d_stae) tensor capturing joint node×timestep patterns.
+        # Projected to hidden_dim without bias so zero-init → zero start.
+        # 24*12*8 + 8*64 = 2,304 + 512 = 2,816 params.
+        if use_stae:
+            _d_stae = 8
+            self.stae_embed = nn.Parameter(torch.zeros(input_len, num_nodes, _d_stae))
+            self.stae_proj = nn.Linear(_d_stae, hidden_dim, bias=False)
+        else:
+            self.stae_embed = None
+            self.stae_proj = None
 
         # --- Geographic coordinate encoder ---
         # Fourier-encodes (lat, lon) → MLP → (N, hidden_dim), fused additively with node_embed.
@@ -835,6 +848,11 @@ class SpatioTemporalTransformerEncoder(nn.Module):
             if self.coord_mlp is not None:
                 emb = emb + self.coord_mlp(self.coord_fourier)  # fuse geographic encoding
             x = x + emb.unsqueeze(0).unsqueeze(0)       # broadcast over B, T
+
+        # Spatio-temporal adaptive embedding: (T, N, H) broadcast over B.
+        # Zero-init → zero contribution at start; learns joint node×time biases.
+        if self.stae_embed is not None:
+            x = x + self.stae_proj(self.stae_embed).unsqueeze(0)
 
         # Precompute static geographic distance bias for GAT attention (None if disabled)
         if self.geo_bias_proj is not None:
@@ -1462,6 +1480,7 @@ class GraphTransformerModel(nn.Module):
         use_itransformer: bool = False,
         input_len: int = 24,
         use_seg_moe: bool = False,
+        use_stae: bool = False,
         use_regime_alpha: bool = False,
         use_regime_persistence: bool = False,
         use_regime_embedding: bool = False,
@@ -1640,6 +1659,7 @@ class GraphTransformerModel(nn.Module):
             use_itransformer=use_itransformer,
             input_len=input_len,
             use_seg_moe=use_seg_moe,
+            use_stae=use_stae,
         )
 
         # Post-temporal spatial refinement (optional).
