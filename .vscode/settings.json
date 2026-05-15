@@ -44,4 +44,5 @@
   "terminal.integrated.env.windows": {
     "PYTHONDONTWRITEBYTECODE": "1"
   }
+  
 }

@@ -418,55 +418,79 @@ def fig_model_architecture():
 
 
 def fig_segmoe_block():
-    """SegMoE FFN module replacing standard FFN in Transformer encoder."""
+    """Seg-MoE FFN block — 2-expert soft-routing architecture."""
     fig, ax = plt.subplots(figsize=(8, 5.5))
     ax.set_xlim(0, 10); ax.set_ylim(0, 7); ax.axis('off')
-    ax.set_title('SegMoE FFN Block (Replaces Standard Transformer FFN)', fontsize=12, pad=8)
+    ax.set_title('Seg-MoE FFN Block (Replaces Standard Transformer FFN)', fontsize=12, pad=8)
 
-    # Left: standard FFN
+    # ── Left: Standard FFN ──────────────────────────────────────────────────
     ax.text(1.7, 6.4, 'Standard FFN', ha='center', fontsize=10, fontweight='bold', color='#444')
     std_blocks = [
-        (1.7, 5.4, 2.0, 0.6, 'Input $x \\in \\mathbb{R}^D$',       '#F5F5F5'),
-        (1.7, 4.2, 2.0, 0.6, 'Linear($D, 4D$) + ReLU',              '#E8F4FD'),
-        (1.7, 3.0, 2.0, 0.6, 'Linear($4D, D$)',                      '#E8F4FD'),
-        (1.7, 1.9, 2.0, 0.6, 'Output $x\' \\in \\mathbb{R}^D$',     '#F5F5F5'),
+        (1.7, 5.4, 2.0, 0.6, 'Input $x \\in \\mathbb{R}^D$',   '#F5F5F5'),
+        (1.7, 4.2, 2.0, 0.6, 'Linear($D, 4D$) + ReLU',          '#E8F4FD'),
+        (1.7, 3.0, 2.0, 0.6, 'Linear($4D, D$)',                  '#E8F4FD'),
+        (1.7, 1.9, 2.0, 0.6, "Output $x' \\in \\mathbb{R}^D$",  '#F5F5F5'),
     ]
     for (x, y, w, h, lbl, fc) in std_blocks:
         draw_box(ax, x, y, w, h, lbl, facecolor=fc, fontsize=8.5)
-    for i in range(len(std_blocks)-1):
-        draw_arrow(ax, std_blocks[i][0], std_blocks[i][1]-std_blocks[i][3]/2,
-                      std_blocks[i+1][0], std_blocks[i+1][1]+std_blocks[i+1][3]/2)
+    for i in range(len(std_blocks) - 1):
+        draw_arrow(ax, std_blocks[i][0], std_blocks[i][1] - std_blocks[i][3] / 2,
+                       std_blocks[i+1][0], std_blocks[i+1][1] + std_blocks[i+1][3] / 2)
 
     # Divider
     ax.plot([4.1, 4.1], [0.5, 6.8], color='#CCCCCC', lw=1.2, linestyle='--')
     ax.text(4.1, 0.2, 'replaced by →', ha='center', fontsize=9, color='#888')
 
-    # Right: SegMoE FFN
-    ax.text(7.4, 6.4, 'SegMoE FFN', ha='center', fontsize=10, fontweight='bold', color=COLORS['primary'])
+    # ── Right: actual Seg-MoE (2-expert soft routing) ───────────────────────
+    ax.text(7.1, 6.4, 'Seg-MoE FFN', ha='center', fontsize=10,
+            fontweight='bold', color=COLORS['primary'])
 
-    draw_box(ax, 7.4, 5.4, 2.4, 0.6, 'Input $x \\in \\mathbb{R}^D$', facecolor='#F5F5F5', fontsize=8.5)
-    draw_arrow(ax, 7.4, 5.1, 7.4, 4.7)
-    draw_box(ax, 7.4, 4.35, 3.2, 0.6, 'Split into $K$ segments of size $D/K$', facecolor='#E8F4FD', fontsize=8.5)
+    # Input box: center (7.1, 5.5), top=5.775, bottom=5.225
+    draw_box(ax, 7.1, 5.5, 2.4, 0.55, 'Input $x \\in \\mathbb{R}^D$',
+             facecolor='#F5F5F5', fontsize=8.5)
 
-    # Expert branches
-    expert_xs = [5.8, 7.4, 9.0]
-    expert_y  = 3.0
-    for i, ex in enumerate(expert_xs):
-        color = [COLORS['light'], '#E8F8F0', '#FEF9E7'][i]
-        draw_box(ax, ex, expert_y, 1.2, 0.7, f'Expert\nFFN {i+1}', facecolor=color, fontsize=8)
-        draw_arrow(ax, ex, 4.35-0.3, ex, expert_y+0.35)
+    # Fan arrows: input bottom (5.225) → expert tops (3.95+0.425=4.375)
+    ax.annotate('', xy=(5.55, 4.375), xytext=(6.5, 5.225),
+                arrowprops=dict(arrowstyle='->', color='#555', lw=1.1))
+    ax.annotate('', xy=(8.65, 4.375), xytext=(7.7, 5.225),
+                arrowprops=dict(arrowstyle='->', color='#555', lw=1.1))
 
-    # Concat
-    draw_box(ax, 7.4, 1.8, 3.2, 0.55, 'Concatenate + Linear($D, D$)', facecolor='#E8F4FD', fontsize=8.5)
-    for ex in expert_xs:
-        draw_arrow(ax, ex, expert_y-0.35, 7.4, 1.8+0.275)
+    # Expert boxes: center y=3.95, h=0.85 → top=4.375, bottom=3.525
+    draw_box(ax, 5.55, 3.95, 1.9, 0.85,
+             'Expert FFN 1\nLinear($D,4D$)+ReLU\nLinear($4D,D$)',
+             facecolor=COLORS['light'], fontsize=7.5)
+    draw_box(ax, 8.65, 3.95, 1.9, 0.85,
+             'Expert FFN 2\nLinear($D,4D$)+ReLU\nLinear($4D,D$)',
+             facecolor='#E8F8F0', fontsize=7.5)
 
-    draw_box(ax, 7.4, 0.9, 2.4, 0.55, "Output $x' \\in \\mathbb{R}^D$", facecolor='#F5F5F5', fontsize=8.5)
-    draw_arrow(ax, 7.4, 1.8-0.275, 7.4, 0.9+0.275)
+    # Convergence arrows: expert bottoms (3.525) → weighted sum top (2.35+0.325=2.675)
+    ax.annotate('', xy=(6.35, 2.675), xytext=(5.55, 3.525),
+                arrowprops=dict(arrowstyle='->', color='#555', lw=1.1))
+    ax.text(5.5, 3.08, '$g_1$', fontsize=10, color=COLORS['primary'],
+            ha='center', fontweight='bold')
 
-    ax.text(4.75, 3.2, 'Segment routing\n(no gating network;\nhard partitioning)',
-            fontsize=7.5, color='#555', ha='left', va='center',
-            bbox=dict(facecolor='#FAFAFA', edgecolor='#CCCCCC', boxstyle='round,pad=0.3'))
+    ax.annotate('', xy=(7.85, 2.675), xytext=(8.65, 3.525),
+                arrowprops=dict(arrowstyle='->', color='#555', lw=1.1))
+    ax.text(8.7, 3.08, '$g_2$', fontsize=10, color=COLORS['primary'],
+            ha='center', fontweight='bold')
+
+    # Weighted sum box: center (7.1, 2.35), h=0.65 → top=2.675, bottom=2.025
+    draw_box(ax, 7.1, 2.35, 3.6, 0.65,
+             'Weighted sum: $g_1 \\cdot E_1(x) + g_2 \\cdot E_2(x)$',
+             facecolor='#E8F4FD', fontsize=8.2)
+
+    # Arrow: sum bottom (2.025) → output top (1.1+0.275=1.375)
+    draw_arrow(ax, 7.1, 2.025, 7.1, 1.375)
+
+    # Output box: center (7.1, 1.1)
+    draw_box(ax, 7.1, 1.1, 2.4, 0.55, "Output $x' \\in \\mathbb{R}^D$",
+             facecolor='#F5F5F5', fontsize=8.5)
+
+    # Router formula note (bottom of right panel, below output)
+    ax.text(7.1, 0.5,
+            r'Soft router: $\mathbf{g} = \mathrm{softmax}(\mathbf{W}_r \bar{z}_{\mathrm{PM_{2.5}}}) \in \mathbb{R}^2$'
+            '   ($g_1 + g_2 = 1$)',
+            ha='center', va='center', fontsize=7.5, color='#555', style='italic')
 
     save(fig, 'fig_segmoe_block')
 
