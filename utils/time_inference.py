@@ -38,7 +38,7 @@ from utils.tester import (
 from train import split_data, scale_data
 
 CHECKPOINT = Path(
-    "models/checkpoints/transformer/"
+    "utils/"
     "graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_SEgmoe_T4_best.pt"
 )
 
