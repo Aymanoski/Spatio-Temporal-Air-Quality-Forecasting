@@ -38,7 +38,6 @@ from utils.tester import (
 from train import split_data, scale_data
 
 CHECKPOINT = Path(
-    "/"
     "graph_transformer_gat_v1_residual_log1p_all_std_stationbias_temporal_first_SEgmoe_T4_best.pt"
 )
 
@@ -113,11 +112,12 @@ def main():
     parser.add_argument("--runs", type=int, default=3, help="Number of timed runs (default 3)")
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument("--checkpoint", type=str, default=str(CHECKPOINT))
+    parser.add_argument("--data-path", type=str, default=str(DATA_PATH), help="Path to processed data directory")
     args = parser.parse_args()
 
     device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
     checkpoint_path = Path(args.checkpoint)
-    data_path = DATA_PATH
+    data_path = Path(args.data_path)
 
     print("=" * 60)
     print("Inference Timing Benchmark")
